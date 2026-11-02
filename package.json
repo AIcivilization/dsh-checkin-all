@@ -1,0 +1,86 @@
+{
+  "name": "dsh-checkin-all",
+  "version": "0.5.0",
+  "description": "每日自动签到领积分：MiniMax Code、WPS 灵犀、百度 DuMate 一键签到打卡，连续签到不断签。支持 check-in / sign-in / 签到 / 打卡 / 每日领取 / 积分 / 智点，面板按服务切换卡片，本机凭据零配置，签完记账。DeepSeek Harness (dsh) 插件。",
+  "keywords": [
+    "dsh-plugin",
+    "dsh-plugins",
+    "dsh",
+    "deepseek-harness",
+    "deepseek-harness-plugin",
+    "deepseek",
+    "cordis",
+    "checkin",
+    "check-in",
+    "signin",
+    "sign-in",
+    "daily",
+    "auto",
+    "automation",
+    "points",
+    "credits",
+    "reward",
+    "签到",
+    "打卡",
+    "每日签到",
+    "连续签到",
+    "自动签到",
+    "积分",
+    "领取",
+    "智点",
+    "minimax",
+    "minimax-code",
+    "wps",
+    "lingxi",
+    "灵犀",
+    "dumate",
+    "baidu",
+    "百度",
+    "搭子",
+    "multi-account"
+  ],
+  "license": "MIT",
+  "author": "AIcivilization",
+  "type": "module",
+  "main": "./plugin/index.js",
+  "exports": {
+    ".": "./plugin/index.js",
+    "./client": "./plugin/client.js",
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "dsh-checkin-all": "bin/dsh-checkin-all.js"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "plugin",
+    "scripts",
+    "web",
+    "README.md",
+    "LICENSE",
+    "docs"
+  ],
+  "scripts": {
+    "test": "node --test \"test/*.test.js\""
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./plugin/cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AIcivilization/dsh-checkin-all.git"
+  },
+  "homepage": "https://github.com/AIcivilization/dsh-checkin-all#readme",
+  "bugs": {
+    "url": "https://github.com/AIcivilization/dsh-checkin-all/issues"
+  }
+}

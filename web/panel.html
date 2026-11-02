@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232f6bff'/%3E%3Cpath d='M9 17l4 4 10-11' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<title>自动签到 · dsh-checkin-all</title>
+<link rel="stylesheet" href="/api-dsh-checkin-all/panel.css">
+</head>
+<body>
+<div class="wrap">
+
+  <!-- 顶部索引：每个签到服务一张卡，点一下切到下面那页 -->
+  <header class="head">
+    <div class="head-title">
+      <span class="logo">✓</span>
+      <div>
+        <h1>自动签到</h1>
+        <p id="subtitle" class="sub">每天自动领积分</p>
+      </div>
+    </div>
+  </header>
+
+  <nav id="index" class="index" aria-label="签到服务">
+    <div class="index-loading muted">读取中…</div>
+  </nav>
+
+  <section id="banner" class="banner hidden"></section>
+
+  <!-- 当前选中服务的内容 -->
+  <main id="detail" class="detail">
+    <div class="detail-loading muted">读取中…</div>
+  </main>
+
+  <footer class="foot">
+    <span id="version"></span>
+    <span class="dot">·</span>
+    <span>凭据来自本机的 App，不经过任何第三方</span>
+  </footer>
+</div>
+
+<section id="login" class="modal hidden">
+  <div class="modal-box">
+    <h3 id="login-title">登录</h3>
+    <p class="muted" id="login-hint">在浏览器里打开下面的地址，输入设备码确认一次即可（和 App 里登录是同一个流程）。</p>
+    <div class="code-box">
+      <span id="login-code">····-····</span>
+      <button id="copy-code" class="btn tiny">复制</button>
+    </div>
+    <a id="login-link" class="link" target="_blank" rel="noreferrer">打开授权页面</a>
+    <p id="login-status" class="hint">等待确认…</p>
+    <div class="actions">
+      <button id="login-close" class="btn">关闭</button>
+    </div>
+  </div>
+</section>
+
+<script src="/api-dsh-checkin-all/panel.js"></script>
+</body>
+</html>

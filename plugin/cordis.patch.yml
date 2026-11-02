@@ -1,0 +1,12 @@
+# dsh-checkin-all 的 dsh 插件：每天自动给 MiniMax Code 签到领积分。
+# 面板挂在对话页右侧栏，设置里有一个「MiniMax 签到」分区。
+#
+# 可在 profile 的 cordis.patch.yml 里给 id: dsh-checkin-all 加 config：
+#   enabled: true      是否自动签到
+#   time: '09:00'      每天几点签
+#   timeZone: ''       时区覆盖，空 = 跟随本机
+#   catchUp: true      过了时间才开机是否补签
+#   notify: true       签完是否提示
+- insert:
+    - id: dsh-checkin-all
+      name: dsh-checkin-all
