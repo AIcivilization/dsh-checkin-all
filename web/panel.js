@@ -10,10 +10,10 @@ async function api(path, { method = 'GET', body } = {}) {
   const response = await fetch(BASE + path, {
     method,
     credentials: 'same-origin',
-    headers: method === 'POST'
+    headers: method === 'POST' || method === 'DELETE'
       ? { 'content-type': 'application/json', 'x-dsh-checkin-all': '1' }
       : undefined,
-    body: method === 'POST' ? JSON.stringify(body || {}) : undefined,
+    body: method === 'POST' || method === 'DELETE' ? JSON.stringify(body || {}) : undefined,
   })
   // DSH 的鉴权拦截器对未认证请求回 401 + 空 body：直接 r.json() 会炸成
   // "Unexpected end of JSON input"，这里先读文本再解析，空响应给一句人话
@@ -122,6 +122,14 @@ function renderDetail() {
     : ''
 
   const canLogin = p.id === 'minimax'
+  // 支持手动配置凭据的服务
+  const canManual = ['lingxi', 'dumate', 'astudio', 'trae'].includes(p.id)
+  const manualHint = {
+    lingxi: 'wps_sid 的值',
+    dumate: '完整 Cookie 串（含 bce-user-info）',
+    astudio: 'accountId,token,ssoSessionId（逗号分隔）',
+    trae: 'Cloud-IDE-JWT token',
+  }[p.id]
 
   box.innerHTML = `
     <section class="card">
@@ -129,6 +137,7 @@ function renderDetail() {
         <h2>${esc(p.name)}</h2>
         <div class="head-actions">
           ${canLogin && !account.loggedIn ? '<button class="btn tiny" id="btn-login">登录</button>' : ''}
+          ${canManual ? '<button class="btn tiny" id="btn-cred">配置凭据</button>' : ''}
           <button class="btn tiny primary" id="btn-checkin">立刻签到</button>
         </div>
       </div>
@@ -152,6 +161,24 @@ function renderDetail() {
       ${lastText ? `<div class="row"><span class="label">最近一次</span>
         <span class="value ${last.ok ? 'ok' : 'bad'}">${esc(lastText)}</span></div>` : ''}
     </section>
+
+    ${canManual ? `
+    <section class="card" id="cred-card">
+      <div class="card-head">
+        <h2>凭据配置</h2>
+        <span class="hint" id="cred-status"></span>
+      </div>
+      <div class="field">
+        <label for="cred-value">${esc(manualHint)}</label>
+        <textarea id="cred-value" rows="3" placeholder="${esc(manualHint)}"></textarea>
+      </div>
+      <div class="actions">
+        <button class="btn primary" id="btn-cred-save">保存凭据</button>
+        <button class="btn" id="btn-cred-clear">清除凭据</button>
+        <span id="cred-msg" class="hint"></span>
+      </div>
+    </section>
+    ` : ''}
 
     <section class="card">
       <div class="card-head">
@@ -198,10 +225,97 @@ function renderDetail() {
   const loginBtn = $('#btn-login')
   if (loginBtn) loginBtn.onclick = () => startLogin(p.id)
 
+  // 手动凭据配置
+  const credBtn = $('#btn-cred')
+  const credCard = $('#cred-card')
+  if (credCard && credBtn) {
+    credBtn.onclick = () => { credCard.scrollIntoView({ behavior: 'smooth', block: 'center' }) }
+    $('#btn-cred-save').onclick = () => saveCredential(p.id)
+    $('#btn-cred-clear').onclick = () => clearCredential(p.id)
+    loadCredentialStatus(p.id)
+  }
+
   renderHistory(st.recent)
   const cached = PANELS.get(p.id)
   if (cached) renderWeek(cached)
   else loadPanel(p.id)
+}
+
+/** 读某个服务的手动凭据状态（脱敏，只显示「已配置」） */
+async function loadCredentialStatus(id) {
+  const status = $('#cred-status')
+  if (!status) return
+  try {
+    const r = await api(`/credential?id=${encodeURIComponent(id)}`)
+    if (r.ok && r.manual && r.manual[id]?.configured) {
+      status.textContent = '已配置（重新保存会覆盖）'
+      status.className = 'hint ok'
+    } else {
+      status.textContent = '未配置'
+      status.className = 'hint'
+    }
+  } catch (e) {
+    status.textContent = e.message
+    status.className = 'hint bad'
+  }
+}
+
+/** 保存手动凭据 */
+async function saveCredential(id) {
+  const value = $('#cred-value').value.trim()
+  const msg = $('#cred-msg')
+  if (!value) {
+    if (msg) msg.textContent = '请输入凭据值'
+    return
+  }
+  let entry
+  if (id === 'astudio') {
+    const [accountId, token, ssoSessionId] = value.split(',').map(s => s.trim())
+    if (!accountId || !token) {
+      if (msg) msg.textContent = 'AStudio 需要 accountId 和 token（逗号分隔）'
+      return
+    }
+    entry = { accountId, token, ...(ssoSessionId ? { ssoSessionId } : {}) }
+  } else if (id === 'lingxi') {
+    entry = { wps_sid: value }
+  } else if (id === 'dumate') {
+    entry = { cookie: value }
+  } else if (id === 'trae') {
+    entry = { token: value }
+  } else {
+    if (msg) msg.textContent = '这个服务不支持手动配置'
+    return
+  }
+  try {
+    const r = await api(`/credential?id=${encodeURIComponent(id)}`, { method: 'POST', body: { entry } })
+    if (r.ok) {
+      if (msg) { msg.textContent = '已保存'; setTimeout(() => { if (msg) msg.textContent = '' }, 2500) }
+      $('#cred-value').value = ''
+      loadCredentialStatus(id)
+      await refresh({ withPanels: false })
+    } else if (msg) {
+      msg.textContent = r.message || '保存失败'
+    }
+  } catch (e) {
+    if (msg) msg.textContent = `保存失败：${e.message}`
+  }
+}
+
+/** 清除手动凭据（回退到 App 文件读取） */
+async function clearCredential(id) {
+  const msg = $('#cred-msg')
+  try {
+    const r = await api(`/credential?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
+    if (r.ok) {
+      if (msg) { msg.textContent = '已清除'; setTimeout(() => { if (msg) msg.textContent = '' }, 2500) }
+      loadCredentialStatus(id)
+      await refresh({ withPanels: false })
+    } else if (msg) {
+      msg.textContent = r.message || '清除失败'
+    }
+  } catch (e) {
+    if (msg) msg.textContent = `清除失败：${e.message}`
+  }
 }
 
 function renderWeek(panel) {

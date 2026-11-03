@@ -224,11 +224,12 @@ test('凭据文件是私密的 0600（App 会检查权限）', async () => {
 import { createServer } from 'node:http'
 import { createHandler } from '../lib/server.js'
 
-async function withServer(fn) {
+async function withServer(fn, opts = {}) {
   const PREFIX = '/api-dsh-checkin-all'
   const handle = createHandler({
     prefix: PREFIX,
     pkgRoot: new URL('..', import.meta.url).pathname,
+    env: opts.env || process.env,
     runner: {
       meta: () => [
         { id: 'minimax', name: 'MiniMax Code', short: 'MiniMax', color: '#2f6bff', unit: '分', timeZoneMode: 'local', timeZone: '' },
@@ -332,6 +333,55 @@ test('POST 带自定义头 -> 放行', async () => {
     assert.equal(r.status, 200)
     assert.equal((await r.json()).ok, true)
   })
+})
+
+test('/credential GET 脱敏返回，POST/DELETE 需自定义头', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dshmm-cred-'))
+  const env = { ...process.env, HOME: dir, DSH_CHECKIN_ALL_HOME: join(dir, 'plugin') }
+  try {
+    await withServer(async (base) => {
+      // GET 无凭据时返回空 manual
+      const g = await fetch(`${base}/credential`)
+      assert.equal(g.status, 200)
+      const gb = await g.json()
+      assert.equal(gb.ok, true)
+      assert.deepEqual(gb.manual, {})
+
+      // POST 缺自定义头 → 403
+      const p1 = await fetch(`${base}/credential?id=lingxi`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ entry: { wps_sid: 'secret' } }),
+      })
+      assert.equal(p1.status, 403)
+
+      // POST 带自定义头 → 200
+      const p2 = await fetch(`${base}/credential?id=lingxi`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-dsh-checkin-all': '1' },
+        body: JSON.stringify({ entry: { wps_sid: 'secret' } }),
+      })
+      assert.equal(p2.status, 200)
+      assert.equal((await p2.json()).ok, true)
+
+      // GET 脱敏：不返回真实 sid，只返回 configured
+      const g2 = await fetch(`${base}/credential`)
+      const g2b = await g2.json()
+      assert.equal(g2b.manual.lingxi.configured, true)
+      assert.equal(g2b.manual.lingxi.wps_sid, true) // 只表示「有值」，不返回真实值
+
+      // DELETE 带自定义头 → 200
+      const d = await fetch(`${base}/credential?id=lingxi`, {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json', 'x-dsh-checkin-all': '1' },
+        body: '{}',
+      })
+      assert.equal(d.status, 200)
+      assert.equal((await d.json()).ok, true)
+    }, { env })
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
 })
 
 // ── 客户端拼路径：曾经写成 BASE + path，api('status') 拼成 /api-dsh-checkin-allstatus → 404 ──
