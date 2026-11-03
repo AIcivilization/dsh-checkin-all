@@ -8,7 +8,7 @@
 //   dsh-checkin-all on | off            开 / 关自动签到
 //   dsh-checkin-all cron                给系统 crontab 用的静默签到
 //
-// 服务名：minimax（MiniMax Code）/ lingxi（WPS 灵犀）/ dumate（百度 DuMate）/ astudio（AStudio）
+// 服务名：minimax（MiniMax Code）/ lingxi（WPS 灵犀）/ dumate（百度 DuMate）/ astudio（AStudio）/ qoder（Qoder）/ trae（Trae）/ doubao（豆包）
 //
 // 系统 crontab 里可以这样挂（不想依赖 DSH 常驻时）：
 //   0 9 * * * /path/to/dsh-checkin-all cron >> ~/.dsh/dsh-checkin-all/cron.log 2>&1
@@ -28,6 +28,14 @@ const STATUS_TAG = { 1: '未到', 2: '可领', 3: '已领', 4: '未开放' }
 
 function printPanel(panel, unit) {
   if (!panel || !panel.days.length) return console.log('  签到表读不出来')
+  // 「每日登录积分」型服务（AStudio）：只显示今天一天，不显示「本周 7 天」
+  if (panel.style === 'daily') {
+    const day = panel.days[0]
+    const done = day.status === 3
+    console.log(`  今天  +${String(day.points).padStart(5)}${done ? '  已到账' : '  可领取'}  ← 今天`)
+    if (panel.accountCredits) console.log(`  账户累计 ${panel.accountCredits} ${unit}`)
+    return
+  }
   for (const day of panel.days) {
     const mark = day.isToday ? '  ← 今天' : ''
     const bonus = day.bonusPoints ? ` +${day.bonusPoints}奖励` : ''
@@ -161,6 +169,15 @@ main().catch((error) => {
   }
   if (error.code === 'ASTUDIO_NOT_LOGGED_IN' || error.code === 'ASTUDIO_SESSION_EXPIRED') {
     console.error('AStudio 没登录或登录失效：打开 AStudio App 登录一次')
+  }
+  if (error.code === 'QODER_NOT_CONFIGURED' || error.code === 'QODER_AUTH') {
+    console.error('Qoder 没配置：在面板里添加个人访问令牌（PAT）')
+  }
+  if (error.code === 'TRAE_NOT_LOGGED_IN') {
+    console.error('Trae 没登录：打开 Trae App 登录一次（要在装了 Trae 的电脑上签）')
+  }
+  if (error.code === 'DOUBAO_NOT_CONFIGURED') {
+    console.error('豆包没配置：在面板里添加 Cookie（手动粘贴或从浏览器读）')
   }
   process.exitCode = 1
 })

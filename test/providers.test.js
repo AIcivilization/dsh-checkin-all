@@ -81,11 +81,11 @@ test('灵犀从任务列表里挑出签到任务', () => {
   assert.equal(pickDailyTask(null), null)
 })
 
-test('注册表里有四个服务，元信息齐全', () => {
+test('注册表里有七个服务，元信息齐全', () => {
   const providers = createProviders({ log: () => {} })
-  assert.deepEqual(providers.ids(), ['minimax', 'lingxi', 'dumate', 'astudio'])
+  assert.deepEqual(providers.ids(), ['minimax', 'lingxi', 'dumate', 'astudio', 'qoder', 'trae', 'doubao'])
   const meta = providers.meta()
-  assert.equal(meta.length, 4)
+  assert.equal(meta.length, 7)
   const lingxi = meta.find(m => m.id === 'lingxi')
   assert.equal(lingxi.name, 'WPS 灵犀')
   assert.equal(lingxi.timeZoneMode, 'fixed')
@@ -102,6 +102,18 @@ test('注册表里有四个服务，元信息齐全', () => {
   assert.equal(astudio.timeZoneMode, 'fixed')
   assert.equal(astudio.timeZone, 'Asia/Shanghai')
   assert.equal(astudio.unit, '积分')
+  const qoder = meta.find(m => m.id === 'qoder')
+  assert.equal(qoder.name, 'Qoder')
+  assert.equal(qoder.timeZoneMode, 'fixed')
+  assert.equal(qoder.unit, '积分')
+  const trae = meta.find(m => m.id === 'trae')
+  assert.equal(trae.name, 'Trae')
+  assert.equal(trae.timeZoneMode, 'fixed')
+  assert.equal(trae.unit, '积分')
+  const doubao = meta.find(m => m.id === 'doubao')
+  assert.equal(doubao.name, '豆包')
+  assert.equal(doubao.timeZoneMode, 'fixed')
+  assert.equal(doubao.unit, '额度')
 })
 
 test('每个服务单独设置：没写就跟全局', () => {
@@ -393,7 +405,7 @@ test('AStudio 从 pending 里挑出每日积分弹窗', () => {
   assert.equal(pickDailyPopup(null), null)
 })
 
-test('AStudio 签到表归一化：有待领弹窗 vs 已到账', () => {
+test('AStudio 签到表归一化：只有今天一天，不伪造过去 6 天', () => {
   const now = new Date('2026-11-02T03:20:00Z') // 北京 11-02
   const base = {
     balance: { totalBalance: 3100, sparkTotalBalance: 0, activityBalance: 3100 },
@@ -411,6 +423,8 @@ test('AStudio 签到表归一化：有待领弹窗 vs 已到账', () => {
     ...base,
     popups: [{ componentType: 'DAILY_REWARD_DIALOG', popupId: 1, instanceKey: 'k', payload: { points: '100' } }],
   }, now)
+  assert.equal(pending.style, 'daily')
+  assert.equal(pending.days.length, 1, '只显示今天一天，不伪造过去 6 天')
   assert.equal(pending.claimable, true)
   assert.equal(pending.today.status, 2)
   assert.equal(pending.dailyPoints, 100)
@@ -420,6 +434,7 @@ test('AStudio 签到表归一化：有待领弹窗 vs 已到账', () => {
   const claimed = normalizeAstudioPanel({ ...base, popups: [] }, now)
   assert.equal(claimed.claimable, false)
   assert.equal(claimed.today.status, 3)
+  assert.equal(claimed.days.length, 1)
   assert.match(describeAstudioPanel(claimed), /已到账/)
 })
 
@@ -438,3 +453,66 @@ test('AStudio 凭据目录：Windows 用 USERPROFILE/.acode，macOS 用 ~/.acode
   assert.ok(win.includes('.acode'), 'AStudio 跨平台用 ~/.acode，不是 %APPDATA%')
   assert.ok(win.endsWith('acode/acode/userdata') || win.endsWith('acode\\acode\\userdata'), '应以 acode/userdata 结尾')
 })
+
+// ── Qoder / Trae / 豆包（从 dsh-model 移植的签到服务）──
+
+import { claimableCampaign, QODER_REGIONS } from '../lib/providers/qoder.js'
+import { pickTraeCredential, tokenDaysLeft, decryptStorageValue, tokenAccountId } from '../lib/providers/trae.js'
+import { deviceIdsFor, normalizeCookie, doubaoStatus } from '../lib/providers/doubao.js'
+
+test('Qoder 区域配置完整', () => {
+  assert.equal(QODER_REGIONS.cn.openApi, 'https://openapi.qoder.com.cn')
+  assert.equal(QODER_REGIONS.intl.openApi, 'https://openapi.qoder.sh')
+})
+
+test('Qoder 从活动列表挑出当天能领的 CLAIM_BENEFIT', () => {
+  const now = Date.now()
+  const campaign = { actionType: 'CLAIM_BENEFIT', campaignId: 'c1', startAt: now - 1000, endAt: now + 1000, claimStatus: 'NONE' }
+  assert.equal(claimableCampaign({ campaigns: [campaign] }, now), campaign)
+  // 已过期的活动不选
+  const expired = { actionType: 'CLAIM_BENEFIT', campaignId: 'c2', startAt: now - 2000, endAt: now - 1000 }
+  assert.equal(claimableCampaign({ campaigns: [expired] }, now), undefined)
+  // 非 CLAIM_BENEFIT 不选
+  assert.equal(claimableCampaign({ campaigns: [{ actionType: 'OTHER', startAt: now - 1, endAt: now + 1 }] }, now), undefined)
+})
+
+test('Trae JWT 账号 id 与剩余天数', () => {
+  const payload = { data: { id: 'user-123' }, exp: Math.floor((Date.now() + 86_400_000 * 3) / 1000) }
+  const token = `h.${Buffer.from(JSON.stringify(payload)).toString('base64url')}.s`
+  assert.equal(tokenAccountId(token), 'user-123')
+  assert.equal(tokenDaysLeft(token), 2) // 3 天后过期，向下取整 2 天
+  assert.equal(tokenAccountId('bad'), undefined)
+  assert.equal(tokenDaysLeft('bad'), null)
+})
+
+test('Trae 挑登录：没过期优先，其次带设备 id', () => {
+  const now = Date.now()
+  const mk = (exp, deviceId, accountId) => ({ token: makeJwt(exp), deviceId, accountId, source: 'x' })
+  const expired = mk(now - 1000, 'dev-1', 'a')
+  const liveNoDevice = mk(now + 1000, '', 'a')
+  const liveDevice = mk(now + 1000, 'dev-2', 'a')
+  // 过期的被排到最后
+  assert.equal(pickTraeCredential([expired, liveNoDevice], now), liveNoDevice)
+  // 都活着时带设备的优先
+  assert.equal(pickTraeCredential([liveNoDevice, liveDevice], now), liveDevice)
+})
+
+test('Trae 解密函数对坏输入抛错', () => {
+  assert.throws(() => decryptStorageValue('bad'))
+  assert.throws(() => decryptStorageValue('aGVsbG8='), /太短/)
+})
+
+test('豆包 Cookie 规整与设备标识派生', () => {
+  assert.equal(normalizeCookie('Cookie: a=b; c=d\n'), 'a=b; c=d')
+  assert.equal(normalizeCookie('  a=b ; c=d  '), 'a=b; c=d')
+  const ids = deviceIdsFor('seed-1')
+  assert.ok(ids.web_id.startsWith('76'))
+  assert.equal(ids.tea_uuid.length, 16)
+  // 同种子稳定，不同种子不同
+  assert.deepEqual(deviceIdsFor('seed-1'), ids)
+  assert.notEqual(deviceIdsFor('seed-2').web_id, ids.web_id)
+})
+
+function makeJwt(exp) {
+  return `h.${Buffer.from(JSON.stringify({ exp: Math.floor(exp / 1000), data: { id: 'u' } })).toString('base64url')}.s`
+}

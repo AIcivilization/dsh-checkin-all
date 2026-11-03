@@ -155,7 +155,7 @@ function renderDetail() {
 
     <section class="card">
       <div class="card-head">
-        <h2>本周签到表</h2>
+        <h2 id="week-title">本周签到表</h2>
         <button class="btn tiny" id="btn-refresh">刷新</button>
       </div>
       <div id="week" class="week"><span class="muted">读取中…</span></div>
@@ -211,29 +211,49 @@ function renderWeek(panel) {
     box.innerHTML = '<span class="muted">签到表读不出来</span>'
     return
   }
-  box.innerHTML = panel.days.map((day) => {
-    const cls = day.status === 3 ? 'claimed' : day.status === 2 ? 'claimable' : ''
-    const bonus = day.bonusPoints ? `<div class="tag">+${day.bonusPoints} 奖励</div>` : ''
-    return `<div class="day ${cls}${day.isToday ? ' today' : ''}">
-      <div class="no">第 ${day.dayNo} 天</div>
-      <div class="pts">${day.points}</div>
-      <div class="tag">${STATUS_TAG[day.status] || day.status}</div>
-      ${bonus}
+
+  // 「每日登录积分」型服务（如 AStudio）：只显示今天一天，标题改成「每日登录」
+  const isDaily = panel.style === 'daily'
+  const title = $('#week-title')
+  if (title) title.textContent = isDaily ? '每日登录积分' : '本周签到表'
+
+  if (isDaily) {
+    const day = panel.days[0]
+    const done = day.status === 3
+    box.innerHTML = `<div class="day ${done ? 'claimed' : 'claimable'} today">
+      <div class="no">今天</div>
+      <div class="pts">+${day.points}</div>
+      <div class="tag">${done ? '已到账' : '可领取'}</div>
     </div>`
-  }).join('')
+  } else {
+    box.innerHTML = panel.days.map((day) => {
+      const cls = day.status === 3 ? 'claimed' : day.status === 2 ? 'claimable' : ''
+      const bonus = day.bonusPoints ? `<div class="tag">+${day.bonusPoints} 奖励</div>` : ''
+      return `<div class="day ${cls}${day.isToday ? ' today' : ''}">
+        <div class="no">第 ${day.dayNo} 天</div>
+        <div class="pts">${day.points}</div>
+        <div class="tag">${STATUS_TAG[day.status] || day.status}</div>
+        ${bonus}
+      </div>`
+    }).join('')
+  }
 
   const note = $('#week-note')
   if (!note) return
   const parts = []
-  if (panel.today) {
+  if (isDaily) {
+    parts.push(panel.today.status === 3
+      ? `今天已自动到账 +${panel.today.points} 积分`
+      : `今天可领取 +${panel.today.points} 积分`)
+  } else if (panel.today) {
     parts.push(panel.today.status === 3
       ? `今天（第 ${panel.today.dayNo} 天）已签，+${panel.today.points + panel.today.bonusPoints}`
       : panel.today.status === 2
         ? `今天（第 ${panel.today.dayNo} 天）还没签，可领 ${panel.today.points + panel.today.bonusPoints}`
         : `今天（第 ${panel.today.dayNo} 天）不可领`)
   }
-  if (panel.consecutiveDays !== undefined) parts.push(`连续 ${panel.consecutiveDays} 天`)
-  parts.push(`本周已领 ${panel.claimedDays} 天，共 ${panel.totalPoints}`)
+  if (!isDaily && panel.consecutiveDays !== undefined) parts.push(`连续 ${panel.consecutiveDays} 天`)
+  if (!isDaily) parts.push(`本周已领 ${panel.claimedDays} 天，共 ${panel.totalPoints}`)
   if (panel.accountCredits) parts.push(`账户累计 ${panel.accountCredits}`)
   note.textContent = parts.join(' · ')
   note.classList.remove('hidden')

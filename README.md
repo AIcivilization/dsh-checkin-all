@@ -1,6 +1,6 @@
 # dsh-checkin-all
 
-每天自动给 **MiniMax Code**、**WPS 灵犀**、**百度 DuMate（搭子）** 和 **AStudio（星火）** 签到领积分。装进 [DeepSeek Harness](https://github.com/deepseek-ai/dsh)（dsh）之后，
+每天自动给 **MiniMax Code**、**WPS 灵犀**、**百度 DuMate（搭子）**、**AStudio（星火）**、**Qoder**、**Trae** 和 **豆包** 签到领积分。装进 [DeepSeek Harness](https://github.com/deepseek-ai/dsh)（dsh）之后，
 它会用本机 App 已经存好的登录凭据，每天到点调一次官方签到接口，签完记账，面板挂在对话页右侧栏，
 **顶部按服务切换卡片**。
 
@@ -18,8 +18,11 @@
 | WPS 灵犀 | 灵犀自己的 Cookies（`wps_sid`） | 智点 | **北京时间** |
 | 百度 DuMate | `qianfan-desktop-app/auth.json`（加密 cookie） | 积分 | **北京时间** |
 | AStudio | `~/.acode/acode/userdata/astron-session.json` | 积分 | **北京时间** |
+| Qoder | 个人访问令牌（PAT，面板里填） | 积分 | **北京时间** |
+| Trae | 本机 Trae App/CLI 登录（自动读） | 积分 | **北京时间** |
+| 豆包 | 登录 Cookie（面板里填，或从本机浏览器读） | 额度 | **北京时间** |
 
-签到窗口不一样：灵犀、搭子和 AStudio 按北京时间算日期，美西晚上 8 点之后就已经是北京的第二天了。
+签到窗口不一样：灵犀、搭子、AStudio、Qoder、Trae、豆包 按北京时间算日期，美西晚上 8 点之后就已经是北京的第二天了。
 插件按各自的规则判断「今天」，互不干扰。
 
 ## 它做什么
@@ -56,7 +59,7 @@ dsh plugin --profile desktop add /path/to/dsh-checkin-all
 ```bash
 node bin/dsh-checkin-all.js status          # 每个服务：登录状态 + 本周签到表 + 连续天数
 node bin/dsh-checkin-all.js checkin         # 全部签到（--dry 只看不领）
-node bin/dsh-checkin-all.js checkin lingxi  # 只签灵犀（或 minimax / dumate / astudio）
+node bin/dsh-checkin-all.js checkin lingxi  # 只签灵犀（或 minimax / dumate / astudio / qoder / trae / doubao）
 node bin/dsh-checkin-all.js login           # 设备码登录 MiniMax Code
 node bin/dsh-checkin-all.js time 08:30      # 改自动签到时间
 node bin/dsh-checkin-all.js on | off        # 开 / 关自动签到
@@ -81,7 +84,7 @@ node bin/dsh-checkin-all.js on | off        # 开 / 关自动签到
 
 命令：`/checkin 状态｜签到 [服务]｜时间 09:00｜开启｜关闭｜登录`（`/minimax` 是别名）
 
-服务名：`minimax`（MiniMax Code）/ `lingxi`（WPS 灵犀）/ `dumate`（百度 DuMate）/ `astudio`（AStudio）
+服务名：`minimax`（MiniMax Code）/ `lingxi`（WPS 灵犀）/ `dumate`（百度 DuMate）/ `astudio`（AStudio）/ `qoder`（Qoder）/ `trae`（Trae）/ `doubao`（豆包）
 
 ## 配置
 
@@ -226,6 +229,47 @@ POST client-popups/complete        领取（body: { popupId, instanceKey }）
 ```
 ssoSessionId=<ssoSessionId>; sso_sessionid=<ssoSessionId>; account_id=<accountId>; token=<token>
 ```
+
+### Qoder
+
+Qoder 的「签到」= **每日领取 CLAIM_BENEFIT 赠送积分**，与 Qoder 桌面端「用量面板」的领取链路一致
+（`lib/providers/qoder.js`）：
+
+```
+POST {openApi}/api/v1/jobToken/exchange         PAT 换短期 jobToken
+GET  {openApi}/sash/api/v1/me/campaigns         找当天的 CLAIM_BENEFIT 活动
+POST {openApi}/sash/api/v1/me/campaigns/{id}/claim   幂等领取（重复返回 replayed）
+```
+
+- 国内版 `https://openapi.qoder.com.cn`，国际版 `https://openapi.qoder.sh`
+- 凭据：**个人访问令牌（PAT）**，在面板里填，存 `~/.dsh/dsh-checkin-all/secrets.json`（0600）
+- 「今天」按**北京时间**算
+
+### Trae
+
+Trae（国内版 / SOLO）的每日签到，读本机 Trae 桌面 App 或 CLI 的登录（`lib/providers/trae.js`）：
+
+```
+POST https://api.trae.cn/trae/api/v2/ug/checkin_credits/status   今天签没签
+POST https://api.trae.cn/trae/api/v2/ug/checkin_credits/claim    签到
+```
+
+- 凭据：本机 Trae 的登录（桌面 App 的 `storage.json` 加密信封，或 `~/.trae-cn/trae-jwt-token` / `~/.trae/trae-jwt-token`），只读不落盘
+- 桌面 App 位置：`{TRAE SOLO CN | Trae CN | Trae | TRAE SOLO}/User/globalStorage/storage.json`
+- 「今天」按**北京时间**算
+
+### 豆包
+
+豆包的「天天领额度」每日签到（`lib/providers/doubao.js` + `browser-cookies.js`）：
+
+```
+POST https://www.doubao.com/alice/ug/campaign/v3/detail/        任务面板
+POST https://www.doubao.com/alice/ug/campaign/landing/checkin   领取（幂等，重复返回 idempotent:true）
+```
+
+- 凭据：豆包登录 Cookie（`doubao.com`），在面板里手动粘贴，或从本机豆包电脑版/Chrome/Edge/Brave 自动读
+- 只支持个人账号：飞书企业账号没有签到任务
+- 「今天」按**北京时间**算
 
 ## 隐私
 
