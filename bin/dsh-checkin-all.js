@@ -15,6 +15,7 @@
 
 import { Runner } from '../lib/runner.js'
 import { loadConfig, loadState, saveConfig, providerConfig } from '../lib/store.js'
+import { setManual, getManual, loadSecrets } from '../lib/checkin-secrets.js'
 
 const argv = process.argv.slice(2)
 const command = (argv[0] || 'status').toLowerCase()
@@ -148,10 +149,67 @@ async function main() {
     return
   }
 
+  if (command === 'set' || command === 'cred' || command === '手动配置') {
+    const provider = rest[0]
+    const value = rest.slice(1).join(' ').trim()
+    if (!provider || !value) {
+      console.error('用法：dsh-checkin-all set <服务> <值>')
+      console.error('  lingxi  → wps_sid 的值')
+      console.error('  dumate  → 完整 Cookie 串（含 bce-user-info）')
+      console.error('  astudio → "accountId,token,ssoSessionId"（逗号分隔）')
+      console.error('  trae    → Cloud-IDE-JWT token')
+      process.exitCode = 2
+      return
+    }
+    if (provider === 'astudio') {
+      const [accountId, token, ssoSessionId] = value.split(',').map(s => s.trim())
+      if (!accountId || !token) {
+        console.error('AStudio 需要 accountId 和 token（用逗号分隔）')
+        process.exitCode = 2
+        return
+      }
+      await setManual('astudio', { accountId, token, ...(ssoSessionId ? { ssoSessionId } : {}) })
+      console.log('已保存 AStudio 手动凭据')
+      return
+    }
+    if (provider === 'lingxi') {
+      await setManual('lingxi', { wps_sid: value })
+      console.log('已保存灵犀 wps_sid')
+      return
+    }
+    if (provider === 'dumate') {
+      await setManual('dumate', { cookie: value })
+      console.log('已保存搭子 Cookie')
+      return
+    }
+    if (provider === 'trae') {
+      await setManual('trae', { token: value })
+      console.log('已保存 Trae token')
+      return
+    }
+    console.error(`不认识的服务：${provider}（只能是 lingxi / dumate / astudio / trae）`)
+    process.exitCode = 2
+    return
+  }
+
+  if (command === 'unset' || command === '删配置') {
+    const provider = rest[0]
+    if (!provider) {
+      console.error('用法：dsh-checkin-all unset <服务>')
+      process.exitCode = 2
+      return
+    }
+    await setManual(provider, null)
+    console.log(`已删除 ${provider} 的手动凭据`)
+    return
+  }
+
   console.log(`用法：
   dsh-checkin-all status              所有服务：登录状态 + 本周签到表
   dsh-checkin-all checkin [服务]      立刻签到（--dry 只看不领）
   dsh-checkin-all login               设备码登录 MiniMax Code
+  dsh-checkin-all set <服务> <值>     手动配置凭据（lingxi/dumate/astudio/trae）
+  dsh-checkin-all unset <服务>        删除某个服务的手动凭据
   dsh-checkin-all time 08:30          改自动签到时间
   dsh-checkin-all on | off            开 / 关自动签到
   dsh-checkin-all cron                给系统 crontab 用的静默签到

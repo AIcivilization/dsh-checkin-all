@@ -65,6 +65,22 @@ node bin/dsh-checkin-all.js time 08:30      # 改自动签到时间
 node bin/dsh-checkin-all.js on | off        # 开 / 关自动签到
 ```
 
+### 手动配置凭据（VPS 等没有 App 的机器）
+
+灵犀、搭子、AStudio、Trae 默认读本机 App 的登录文件；在 VPS 上或没有装对应 App 时，
+可以手动配置凭据（存 `~/.dsh/dsh-checkin-all/secrets.json`，0600）：
+
+```bash
+node bin/dsh-checkin-all.js set lingxi  "<wps_sid>"
+node bin/dsh-checkin-all.js set dumate  "<完整 Cookie 串，含 bce-user-info>"
+node bin/dsh-checkin-all.js set astudio "<accountId>,<token>,<ssoSessionId>"
+node bin/dsh-checkin-all.js set trae    "<Cloud-IDE-JWT token>"
+
+node bin/dsh-checkin-all.js unset lingxi   # 删除某个服务的手动凭据，回退到 App 文件
+```
+
+手动配置优先于 App 文件；删掉手动凭据后自动回退读 App。
+
 ### 不依赖 DSH 常驻：挂到系统 crontab
 
 ```cron

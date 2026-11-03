@@ -513,6 +513,41 @@ test('豆包 Cookie 规整与设备标识派生', () => {
   assert.notEqual(deviceIdsFor('seed-2').web_id, ids.web_id)
 })
 
+// ── 手动凭据（独立配置，不依赖本机 App）──
+
+import { setManual, getManual, loadManual } from '../lib/checkin-secrets.js'
+import { parseCookieHeader } from '../lib/providers/dumate.js'
+
+test('手动凭据存取：set / get / 删除', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dshmm-man-'))
+  const env = { ...process.env, HOME: dir, DSH_CHECKIN_ALL_HOME: join(dir, 'plugin') }
+  try {
+    await setManual('lingxi', { wps_sid: 'sid-123' }, env)
+    await setManual('dumate', { cookie: 'a=1; bce-user-info="tok"' }, env)
+    await setManual('astudio', { accountId: 'acct', token: 'tok', ssoSessionId: 'sso' }, env)
+    await setManual('trae', { token: 'jwt.token.sig' }, env)
+
+    const manual = await loadManual(env)
+    assert.equal(manual.lingxi.wps_sid, 'sid-123')
+    assert.equal(manual.dumate.cookie, 'a=1; bce-user-info="tok"')
+    assert.equal(manual.astudio.accountId, 'acct')
+    assert.equal(manual.trae.token, 'jwt.token.sig')
+
+    // 删除一个
+    await setManual('lingxi', null, env)
+    assert.equal(await getManual('lingxi', env), null)
+    assert.equal((await getManual('dumate', env)).cookie, 'a=1; bce-user-info="tok"')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('搭子手动 Cookie 解析出 csrftoken 来源', () => {
+  const cookies = parseCookieHeader('a=1; bce-user-info="2026-01-01|tok"; b=2')
+  const csrf = cookies.find(c => c.name === 'bce-user-info')
+  assert.equal(csrf.value, '"2026-01-01|tok"')
+})
+
 function makeJwt(exp) {
   return `h.${Buffer.from(JSON.stringify({ exp: Math.floor(exp / 1000), data: { id: 'u' } })).toString('base64url')}.s`
 }
