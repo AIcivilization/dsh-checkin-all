@@ -8,7 +8,7 @@
 //   dsh-checkin-all on | off            开 / 关自动签到
 //   dsh-checkin-all cron                给系统 crontab 用的静默签到
 //
-// 服务名：minimax（MiniMax Code）/ lingxi（WPS 灵犀）
+// 服务名：minimax（MiniMax Code）/ lingxi（WPS 灵犀）/ dumate（百度 DuMate）/ astudio（AStudio）
 //
 // 系统 crontab 里可以这样挂（不想依赖 DSH 常驻时）：
 //   0 9 * * * /path/to/dsh-checkin-all cron >> ~/.dsh/dsh-checkin-all/cron.log 2>&1
@@ -117,13 +117,13 @@ async function main() {
     }
     const [hour, minute] = String(value).split(':')
     const time = `${hour.padStart(2, '0')}:${minute}`
-    await saveConfig({ time, providers: {} })
+    await saveConfig({ time, providers: null })
     console.log(`全部服务自动签到时间改为每天 ${time}`)
     return
   }
 
   if (command === 'on' || command === 'off') {
-    await saveConfig({ enabled: command === 'on', providers: {} })
+    await saveConfig({ enabled: command === 'on', providers: null })
     console.log(`全部服务自动签到已${command === 'on' ? '开启' : '关闭'}`)
     return
   }
@@ -158,6 +158,9 @@ main().catch((error) => {
   }
   if (error.code === 'LINGXI_NOT_LOGGED_IN' || error.code === 'LINGXI_NO_COOKIE_DB') {
     console.error('灵犀没登录：打开 WPS 灵犀 App 登录一次')
+  }
+  if (error.code === 'ASTUDIO_NOT_LOGGED_IN' || error.code === 'ASTUDIO_SESSION_EXPIRED') {
+    console.error('AStudio 没登录或登录失效：打开 AStudio App 登录一次')
   }
   process.exitCode = 1
 })

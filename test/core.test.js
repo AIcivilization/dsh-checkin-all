@@ -8,7 +8,7 @@ import {
   CLIENT_ID, credentialAccount, credentialKey, listNamespaces, matrixOrigin, accountOrigin, namespacePaths,
 } from '../lib/paths.js'
 import { normalizePanel, describePanel, localTimeZone, DAY_STATUS } from '../lib/signin.js'
-import { dayKey, claimedToday, DEFAULT_CONFIG } from '../lib/store.js'
+import { dayKey, claimedToday, DEFAULT_CONFIG, loadConfig, saveConfig, providerConfig } from '../lib/store.js'
 import { nextRunAt, isDue } from '../lib/scheduler.js'
 import { activeNamespace, readCredential, usableCredential, CredentialError } from '../lib/credentials.js'
 
@@ -163,6 +163,40 @@ test('默认设置合理', () => {
   assert.equal(DEFAULT_CONFIG.enabled, true)
   assert.match(DEFAULT_CONFIG.time, /^\d{2}:\d{2}$/)
   assert.equal(DEFAULT_CONFIG.catchUp, true)
+})
+
+test('saveConfig 按服务合并 providers，不冲掉别的服务', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dshmm-cfg-'))
+  const env = { ...process.env, HOME: dir, DSH_CHECKIN_ALL_HOME: join(dir, 'plugin') }
+  try {
+    // 逐个给三个服务设置单独时间（面板逐个保存的真实场景）
+    await saveConfig({ providers: { minimax: { enabled: true, time: '08:00', catchUp: true } } }, env)
+    await saveConfig({ providers: { lingxi: { enabled: false, time: '08:30', catchUp: false } } }, env)
+    await saveConfig({ providers: { dumate: { enabled: true, time: '01:00', catchUp: true } } }, env)
+
+    // 面板里只改 lingxi：其他两个服务的单独设置必须还在
+    await saveConfig({ providers: { lingxi: { enabled: true, time: '10:00', catchUp: true } } }, env)
+    const cfg = await loadConfig(env)
+    assert.equal(providerConfig(cfg, 'minimax').time, '08:00', 'minimax 单独设置被冲掉了')
+    assert.equal(providerConfig(cfg, 'dumate').time, '01:00', 'dumate 单独设置被冲掉了')
+    assert.equal(providerConfig(cfg, 'lingxi').time, '10:00')
+    assert.equal(providerConfig(cfg, 'lingxi').enabled, true)
+
+    // 全局改时间 / 开关用 providers:null，意思是清空所有单独设置
+    await saveConfig({ time: '07:00', providers: null }, env)
+    const cleared = await loadConfig(env)
+    assert.deepEqual(cleared.providers, {})
+    assert.equal(providerConfig(cleared, 'minimax').time, '07:00')
+
+    // 单个服务传 null = 只删它，回退全局，其他服务不受影响
+    await saveConfig({ providers: { minimax: { time: '08:00' }, lingxi: { time: '08:30' } } }, env)
+    await saveConfig({ providers: { minimax: null } }, env)
+    const afterDrop = await loadConfig(env)
+    assert.equal(afterDrop.providers.minimax, undefined)
+    assert.equal(afterDrop.providers.lingxi.time, '08:30')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
 })
 
 test('凭据文件是私密的 0600（App 会检查权限）', async () => {

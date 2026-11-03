@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/sync-to-vps.sh — 在本机跑：把三个服务的凭据同步到 VPS
+# scripts/sync-to-vps.sh — 在本机跑：把四个服务的凭据同步到 VPS
 #
 # 用法（在本机，不是 VPS 上）：
 #   bash scripts/sync-to-vps.sh <ssh目标> [凭据目录]
@@ -31,11 +31,12 @@ command -v rsync >/dev/null || die "本机没有 rsync（macOS 自带；没有�
 MM_SRC="$HOME/.minimax/auth"
 LX_SRC="$HOME/Library/Application Support/WPS 灵犀/Cookies"
 DM_DIR="$HOME/Library/Application Support/qianfan-desktop-app"
+AS_SRC="$HOME/.acode/acode/userdata/astron-session.json"
 
 say "目标：$TARGET:$CRED_HOME"
 
 # 建目录（顺手把权限收紧）
-ssh "$TARGET" "mkdir -p '$CRED_HOME/minimax/auth' '$CRED_HOME/lingxi' '$CRED_HOME/dumate' && chmod 700 '$CRED_HOME' '$CRED_HOME/minimax' '$CRED_HOME/minimax/auth' '$CRED_HOME/lingxi' '$CRED_HOME/dumate'"
+ssh "$TARGET" "mkdir -p '$CRED_HOME/minimax/auth' '$CRED_HOME/lingxi' '$CRED_HOME/dumate' '$CRED_HOME/astudio' && chmod 700 '$CRED_HOME' '$CRED_HOME/minimax' '$CRED_HOME/minimax/auth' '$CRED_HOME/lingxi' '$CRED_HOME/dumate' '$CRED_HOME/astudio'"
 ok "目录就绪"
 
 # ── MiniMax ──
@@ -71,6 +72,15 @@ if [ "$DM_NEED" = 2 ]; then
   ok "搭子凭据已同步（auth.json + .cookie-key）"
 else
   warn "本机没找齐搭子凭据（需要 auth.json 和 .cookie-key 两个），跳过"
+fi
+
+# ── AStudio ──
+if [ -f "$AS_SRC" ]; then
+  rsync -a "$AS_SRC" "$TARGET:$CRED_HOME/astudio/astron-session.json"
+  ssh "$TARGET" "chmod go-rwx '$CRED_HOME/astudio/astron-session.json' 2>/dev/null || true"
+  ok "AStudio 凭据已同步（astron-session.json）"
+else
+  warn "本机没找到 AStudio 凭据（$AS_SRC），跳过"
 fi
 
 # ── 验证 ──

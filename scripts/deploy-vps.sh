@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/deploy-vps.sh — 在 VPS 上装 dsh-checkin-all（三个签到服务都支持）
+# scripts/deploy-vps.sh — 在 VPS 上装 dsh-checkin-all（四个签到服务都支持）
 #
 # 前提：VPS 上已经装了 dsh，并且至少跑起来过一次（~/.dsh/profiles 存在）。
 #
@@ -10,8 +10,8 @@
 #
 # 它做的事：
 #   1. 检查 node / dsh / profiles
-#   2. 建 ~/.minimax-auth/（700），三个服务各一个子目录
-#   3. 检查三个服务的凭据在不在，缺哪个告诉你缺什么、从本机怎么拷
+#   2. 建 ~/.minimax-auth/（700），四个服务各一个子目录
+#   3. 检查四个服务的凭据在不在，缺哪个告诉你缺什么、从本机怎么拷
 #   4. 把插件 link 进 profile
 #   5. 生成 ~/.minimax-auth/env.sh（环境变量，给 systemd 或 shell 用）
 #   6. 跑一次 status 验证
@@ -62,10 +62,10 @@ ok "目标 profile：$PROFILE"
 # ── 3. 凭据目录 ──
 CRED_HOME="${DSH_CHECKIN_ALL_CRED_HOME:-$HOME/.minimax-auth}"
 say "凭据目录：$CRED_HOME"
-mkdir -p "$CRED_HOME/minimax/auth" "$CRED_HOME/lingxi" "$CRED_HOME/dumate"
-chmod 700 "$CRED_HOME" "$CRED_HOME/minimax" "$CRED_HOME/minimax/auth" "$CRED_HOME/lingxi" "$CRED_HOME/dumate"
+mkdir -p "$CRED_HOME/minimax/auth" "$CRED_HOME/lingxi" "$CRED_HOME/dumate" "$CRED_HOME/astudio"
+chmod 700 "$CRED_HOME" "$CRED_HOME/minimax" "$CRED_HOME/minimax/auth" "$CRED_HOME/lingxi" "$CRED_HOME/dumate" "$CRED_HOME/astudio"
 
-# ── 4. 检查三个服务的凭据 ──
+# ── 4. 检查四个服务的凭据 ──
 missing=0
 say "检查凭据"
 
@@ -101,6 +101,15 @@ else
   missing=$((missing+1))
 fi
 
+# AStudio：astron-session.json（登录态）
+if [ -f "$CRED_HOME/astudio/astron-session.json" ]; then
+  ok "AStudio：astron-session.json 在"
+else
+  warn "AStudio：缺 astron-session.json"
+  echo "     本机拷：rsync -av \"\$HOME/.acode/acode/userdata/astron-session.json\" vps:$CRED_HOME/astudio/"
+  missing=$((missing+1))
+fi
+
 [ "$missing" = 0 ] || warn "有 $missing 个服务缺凭据，装完插件后补上即可（不影响其他服务）"
 
 # ── 5. 装插件 ──
@@ -116,6 +125,7 @@ cat > "$ENV_FILE" <<EOF
 export MINIMAX_DATA_DIR="$CRED_HOME/minimax"
 export LINGXI_DATA_DIR="$CRED_HOME/lingxi"
 export DUMATE_DATA_DIR="$CRED_HOME/dumate"
+export ASTUDIO_DATA_DIR="$CRED_HOME/astudio"
 
 # 只读：VPS 不刷新 MiniMax 的 refresh token
 # （RT 是一次性的，VPS 刷了本机那份就作废了）。
@@ -148,10 +158,10 @@ cat <<EOF
    手动跑 dsh 的话，启动前先：
        source $ENV_FILE
 
-2) 打开 dsh 网页版，右侧栏应该出现「自动签到」，三张卡都在。
+2) 打开 dsh 网页版，右侧栏应该出现「自动签到」，四张卡都在。
 
 3) 时区提醒（重要）：
-   灵犀和搭子按【北京时间】算日期，MiniMax 按【本机时区】。
+   灵犀、搭子和 AStudio 按【北京时间】算日期，MiniMax 按【本机时区】。
    这台机器是 UTC 的话，想在北京时间早上 9 点签，签到时间要设成 01:00。
    在面板里可以给每个服务单独设时间。
 

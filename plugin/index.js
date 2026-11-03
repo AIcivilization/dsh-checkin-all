@@ -203,19 +203,19 @@ export function apply(ctx, config = {}) {
           }
         }
         if (/^(开启|打开|on|enable)$/i.test(arg)) {
-          await saveConfig({ enabled: true, providers: {} })
+          await saveConfig({ enabled: true, providers: null })
           scheduler.reschedule()
           return { kind: 'success', text: '全部服务自动签到已开启' }
         }
         if (/^(关闭|关|off|disable)$/i.test(arg)) {
-          await saveConfig({ enabled: false, providers: {} })
+          await saveConfig({ enabled: false, providers: null })
           scheduler.reschedule()
           return { kind: 'success', text: '全部服务自动签到已关闭' }
         }
         const timeMatch = arg.match(/^(?:时间\s*)?([01]?\d|2[0-3]):([0-5]\d)$/)
         if (timeMatch) {
           const time = `${timeMatch[1].padStart(2, '0')}:${timeMatch[2]}`
-          await saveConfig({ time, providers: {} })
+          await saveConfig({ time, providers: null })
           scheduler.reschedule()
           return { kind: 'success', text: `全部服务自动签到时间改为每天 ${time}` }
         }

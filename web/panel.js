@@ -273,8 +273,9 @@ async function loadPanel(id, { force = false } = {}) {
   try {
     const r = await api(`/signin?id=${encodeURIComponent(id)}`)
     if (r.ok) {
-      PANELS.set(id, r.panel)
-      if (id === CURRENT) renderWeek(r.panel)
+      // /signin 返回的是平铺的签到表 { ok, id, days, today, ... }，不是 { panel: {...} }
+      PANELS.set(id, r)
+      if (id === CURRENT) renderWeek(r)
     } else {
       PANELS.delete(id)
       if (id === CURRENT) week.innerHTML = `<span class="muted">${esc(r.message || '读不到签到表')}</span>`

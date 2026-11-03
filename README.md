@@ -1,6 +1,6 @@
 # dsh-checkin-all
 
-每天自动给 **MiniMax Code**、**WPS 灵犀** 和 **百度 DuMate（搭子）** 签到领积分。装进 [DeepSeek Harness](https://github.com/deepseek-ai/dsh)（dsh）之后，
+每天自动给 **MiniMax Code**、**WPS 灵犀**、**百度 DuMate（搭子）** 和 **AStudio（星火）** 签到领积分。装进 [DeepSeek Harness](https://github.com/deepseek-ai/dsh)（dsh）之后，
 它会用本机 App 已经存好的登录凭据，每天到点调一次官方签到接口，签完记账，面板挂在对话页右侧栏，
 **顶部按服务切换卡片**。
 
@@ -17,8 +17,9 @@
 | MiniMax Code | `~/.minimax/auth/`（OAuth） | 分 | 本机时区 |
 | WPS 灵犀 | 灵犀自己的 Cookies（`wps_sid`） | 智点 | **北京时间** |
 | 百度 DuMate | `qianfan-desktop-app/auth.json`（加密 cookie） | 积分 | **北京时间** |
+| AStudio | `~/.acode/acode/userdata/astron-session.json` | 积分 | **北京时间** |
 
-签到窗口不一样：灵犀和搭子按北京时间算日期，美西晚上 8 点之后就已经是北京的第二天了。
+签到窗口不一样：灵犀、搭子和 AStudio 按北京时间算日期，美西晚上 8 点之后就已经是北京的第二天了。
 插件按各自的规则判断「今天」，互不干扰。
 
 ## 它做什么
@@ -55,7 +56,7 @@ dsh plugin --profile desktop add /path/to/dsh-checkin-all
 ```bash
 node bin/dsh-checkin-all.js status          # 每个服务：登录状态 + 本周签到表 + 连续天数
 node bin/dsh-checkin-all.js checkin         # 全部签到（--dry 只看不领）
-node bin/dsh-checkin-all.js checkin lingxi  # 只签灵犀（或 minimax / dumate）
+node bin/dsh-checkin-all.js checkin lingxi  # 只签灵犀（或 minimax / dumate / astudio）
 node bin/dsh-checkin-all.js login           # 设备码登录 MiniMax Code
 node bin/dsh-checkin-all.js time 08:30      # 改自动签到时间
 node bin/dsh-checkin-all.js on | off        # 开 / 关自动签到
@@ -80,7 +81,7 @@ node bin/dsh-checkin-all.js on | off        # 开 / 关自动签到
 
 命令：`/checkin 状态｜签到 [服务]｜时间 09:00｜开启｜关闭｜登录`（`/minimax` 是别名）
 
-服务名：`minimax`（MiniMax Code）/ `lingxi`（WPS 灵犀）/ `dumate`（百度 DuMate）
+服务名：`minimax`（MiniMax Code）/ `lingxi`（WPS 灵犀）/ `dumate`（百度 DuMate）/ `astudio`（AStudio）
 
 ## 配置
 
@@ -188,6 +189,44 @@ base64( iv(12) || authTag(16) || ciphertext )   AES-256-GCM
 
 插件用 `node:crypto` 解密（不需要额外的原生模块）。
 
+### AStudio（星火）
+
+AStudio 的「签到」= **每日登录积分**：每天首次连上时自动到账，桌面端用「每日积分」弹窗提示。
+插件复刻同一套调用（`lib/providers/astudio.js`）：
+
+```
+GET  points/balance                积分余额（通用 + 星火）
+GET  points/summary                积分摘要
+GET  membership/me                 当前套餐
+GET  membership/plan-config        每日登录积分配置（按套餐给 dailyLoginPoints）
+GET  client-popups/pending         待展示/待领取弹窗（每日积分在这里）
+POST client-popups/complete        领取（body: { popupId, instanceKey }）
+```
+
+- 上游：`https://agent.xfyun.cn/xingchen-studio/`
+- 认证：`Cookie` + 身份头 `clientType` / `studioVersion`
+  - `clientType` 按平台自动上报：Windows `21`、macOS/Linux `22`
+  - `studioVersion` 默认 `3.5.5`，可用环境变量 `ASTUDIO_VERSION` 覆盖
+- 「今天」按**北京时间**算
+
+凭据（`lib/providers/astudio.js`）读 AStudio 的登录态文件 `astron-session.json`：
+
+```
+# macOS / Linux
+~/.acode/acode/userdata/astron-session.json
+# Windows
+%USERPROFILE%\.acode\acode\userdata\astron-session.json
+# { accountId, uid, token, ssoSessionId, mobile, ... }
+```
+
+凭据目录可用 `ASTUDIO_DATA_DIR` 环境变量覆盖（VPS 部署时指到同步目录）。
+
+拼出的 Cookie（和桌面端 `buildAstronCookieHeader` 一致）：
+
+```
+ssoSessionId=<ssoSessionId>; sso_sessionid=<ssoSessionId>; account_id=<accountId>; token=<token>
+```
+
 ## 隐私
 
 - 不保存账号密码，只用 App 已经存好的 OAuth 凭据
@@ -225,6 +264,8 @@ ssh vps 'bash /opt/dsh-checkin-all/scripts/deploy-vps.sh /opt/dsh-checkin-all'
 | `MINIMAX_DATA_DIR` | MiniMax 数据根目录（默认 `~/.minimax`） |
 | `LINGXI_DATA_DIR` | 灵犀数据目录（默认 macOS 的 `~/Library/Application Support/WPS 灵犀`） |
 | `DUMATE_DATA_DIR` | DuMate 数据目录（默认 `~/Library/Application Support/qianfan-desktop-app`） |
+| `ASTUDIO_DATA_DIR` | AStudio 用户数据目录（默认 `~/.acode/acode/userdata`） |
+| `ASTUDIO_VERSION` | AStudio 版本号（默认 `3.5.5`，用于上游 `studioVersion` 头） |
 | `DSH_CHECKIN_ALL_READONLY` | `1` = 不刷新 refresh token |
 | `DSH_CHECKIN_ALL_HOME` | 插件自己的状态目录（默认 `~/.dsh/dsh-checkin-all`） |
 

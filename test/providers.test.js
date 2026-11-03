@@ -81,11 +81,11 @@ test('灵犀从任务列表里挑出签到任务', () => {
   assert.equal(pickDailyTask(null), null)
 })
 
-test('注册表里有三个服务，元信息齐全', () => {
+test('注册表里有四个服务，元信息齐全', () => {
   const providers = createProviders({ log: () => {} })
-  assert.deepEqual(providers.ids(), ['minimax', 'lingxi', 'dumate'])
+  assert.deepEqual(providers.ids(), ['minimax', 'lingxi', 'dumate', 'astudio'])
   const meta = providers.meta()
-  assert.equal(meta.length, 3)
+  assert.equal(meta.length, 4)
   const lingxi = meta.find(m => m.id === 'lingxi')
   assert.equal(lingxi.name, 'WPS 灵犀')
   assert.equal(lingxi.timeZoneMode, 'fixed')
@@ -97,6 +97,11 @@ test('注册表里有三个服务，元信息齐全', () => {
   assert.equal(dumate.name, '百度 DuMate')
   assert.equal(dumate.timeZoneMode, 'fixed')
   assert.equal(dumate.unit, '积分')
+  const astudio = meta.find(m => m.id === 'astudio')
+  assert.equal(astudio.name, 'AStudio')
+  assert.equal(astudio.timeZoneMode, 'fixed')
+  assert.equal(astudio.timeZone, 'Asia/Shanghai')
+  assert.equal(astudio.unit, '积分')
 })
 
 test('每个服务单独设置：没写就跟全局', () => {
@@ -350,4 +355,86 @@ test('连续天数：今天没签也从昨天开始数', () => {
   assert.equal(countStreak(['2026-10-29'], today), 0)
   assert.equal(countStreak([], today), 0)
   assert.equal(countStreak(['2026-11-02'], today), 1)
+})
+
+// ── AStudio（星火）：cookie 拼装、签到表归一化、注册表 ──
+
+import {
+  buildCookieHeader, normalizeAstudioPanel, pickDailyPopup, describeAstudioPanel,
+  beijingDayKey as astudioDayKey, ASTUDIO_TZ, astudioStateDir, resolveClientType,
+} from '../lib/providers/astudio.js'
+
+test('AStudio 按北京时间算日期', () => {
+  const d = new Date('2026-11-02T03:20:00Z')
+  assert.equal(astudioDayKey(d), '2026-11-02')
+  assert.equal(ASTUDIO_TZ, 'Asia/Shanghai')
+})
+
+test('AStudio cookie 拼装和桌面端一致', () => {
+  const session = {
+    ssoSessionId: 'sso-123', accountId: '2185', token: 'tok',
+  }
+  const cookie = buildCookieHeader(session)
+  assert.match(cookie, /ssoSessionId=sso-123/)
+  assert.match(cookie, /sso_sessionid=sso-123/)
+  assert.match(cookie, /account_id=2185/)
+  assert.match(cookie, /token=tok/)
+  // 没有 ssoSessionId 时也不炸
+  const minimal = buildCookieHeader({ accountId: 'a', token: 'b' })
+  assert.equal(minimal, 'account_id=a; token=b')
+})
+
+test('AStudio 从 pending 里挑出每日积分弹窗', () => {
+  const daily = { componentType: 'DAILY_REWARD_DIALOG', popupId: 1, instanceKey: 'k' }
+  const other = { componentType: 'NEW_USER_DIALOG', popupId: 2, instanceKey: 'k2' }
+  assert.equal(pickDailyPopup([other, daily]), daily)
+  assert.equal(pickDailyPopup([other]), null)
+  assert.equal(pickDailyPopup([]), null)
+  assert.equal(pickDailyPopup(null), null)
+})
+
+test('AStudio 签到表归一化：有待领弹窗 vs 已到账', () => {
+  const now = new Date('2026-11-02T03:20:00Z') // 北京 11-02
+  const base = {
+    balance: { totalBalance: 3100, sparkTotalBalance: 0, activityBalance: 3100 },
+    membership: { planCode: 'TRIAL', planName: '体验版' },
+    planConfig: {
+      dailyLoginEnabled: true,
+      dailyLoginValidDays: 31,
+      plans: [
+        { planCode: 'TRIAL', planName: '体验版', dailyLoginPoints: 100 },
+        { planCode: 'PRO', planName: '高级版', dailyLoginPoints: 400 },
+      ],
+    },
+  }
+  const pending = normalizeAstudioPanel({
+    ...base,
+    popups: [{ componentType: 'DAILY_REWARD_DIALOG', popupId: 1, instanceKey: 'k', payload: { points: '100' } }],
+  }, now)
+  assert.equal(pending.claimable, true)
+  assert.equal(pending.today.status, 2)
+  assert.equal(pending.dailyPoints, 100)
+  assert.equal(pending.accountCredits, 3100)
+  assert.match(describeAstudioPanel(pending), /待领取/)
+
+  const claimed = normalizeAstudioPanel({ ...base, popups: [] }, now)
+  assert.equal(claimed.claimable, false)
+  assert.equal(claimed.today.status, 3)
+  assert.match(describeAstudioPanel(claimed), /已到账/)
+})
+
+test('AStudio clientType 按平台上报：win32=21，darwin=22', () => {
+  assert.equal(resolveClientType('win32'), '21')
+  assert.equal(resolveClientType('darwin'), '22')
+  assert.equal(resolveClientType('linux'), '22')
+})
+
+test('AStudio 凭据目录：Windows 用 USERPROFILE/.acode，macOS 用 ~/.acode', () => {
+  // macOS 默认候选
+  const mac = astudioStateDir({ HOME: '/Users/wf' })
+  assert.equal(mac, '/Users/wf/.acode/acode/userdata')
+  // Windows：AStudio 用 %USERPROFILE%\.acode（Electron 惯例），不是 %APPDATA%
+  const win = astudioStateDir({ USERPROFILE: 'C:\\Users\\wf', APPDATA: 'C:\\Users\\wf\\AppData\\Roaming' })
+  assert.ok(win.includes('.acode'), 'AStudio 跨平台用 ~/.acode，不是 %APPDATA%')
+  assert.ok(win.endsWith('acode/acode/userdata') || win.endsWith('acode\\acode\\userdata'), '应以 acode/userdata 结尾')
 })

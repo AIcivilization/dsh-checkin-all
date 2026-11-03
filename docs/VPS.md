@@ -1,19 +1,20 @@
 # 在 VPS 上安装 dsh-checkin-all
 
-三个签到服务（MiniMax Code / WPS 灵犀 / 百度 DuMate）都能在无图形界面的服务器上跑。
+四个签到服务（MiniMax Code / WPS 灵犀 / 百度 DuMate / AStudio）都能在无图形界面的服务器上跑。
 凭据从本机拷过去，插件用环境变量指过去。
 
 ---
 
 ## 为什么不能直接装
 
-VPS 上没有这三个 App，插件默认去这几个位置找凭据：
+VPS 上没有这四个 App，插件默认去这几个位置找凭据：
 
 | 服务 | 默认位置（macOS） |
 | --- | --- |
 | MiniMax Code | `~/.minimax/auth/` |
 | WPS 灵犀 | `~/Library/Application Support/WPS 灵犀/Cookies` |
 | 百度 DuMate | `~/Library/Application Support/qianfan-desktop-app/{auth.json,.cookie-key}` |
+| AStudio | `~/.acode/acode/userdata/astron-session.json` |
 
 所以要把凭据拷到 VPS，再用环境变量告诉插件去哪读。
 
@@ -78,15 +79,16 @@ systemctl restart <你的 dsh 服务名>
 
 ## 时区（容易踩）
 
-VPS 通常是 UTC。三个服务的「今天」不一样：
+VPS 通常是 UTC。四个服务的「今天」不一样：
 
 | 服务 | 「今天」按哪算 |
 | --- | --- |
 | MiniMax Code | 本机时区（VPS 上就是 UTC） |
 | WPS 灵犀 | **北京时间** |
 | 百度 DuMate | **北京时间** |
+| AStudio | **北京时间** |
 
-想在北京时间早上 9 点签，UTC 机器上要把灵犀和搭子的签到时间设成 **01:00**。
+想在北京时间早上 9 点签，UTC 机器上要把灵犀、搭子和 AStudio 的签到时间设成 **01:00**。
 面板里可以给每个服务单独设时间。
 
 ---
@@ -98,6 +100,7 @@ VPS 通常是 UTC。三个服务的「今天」不一样：
 | MiniMax | 401，`AUTH_READONLY_EXPIRED` | 本机重新登录 → 重跑 sync |
 | 灵犀 | `LINGXI_NOT_LOGGED_IN` | 灵犀 App 里重新登录 → 重跑 sync |
 | 搭子 | `DUMATE_API_ERROR` 或解密失败 | 搭子 App 里重新登录 → 重跑 sync |
+| AStudio | `ASTUDIO_SESSION_EXPIRED` 或 `ASTUDIO_NOT_LOGGED_IN` | AStudio App 里重新登录 → 重跑 sync |
 
 **建议挂个定时同步**（本机 crontab，每小时一次）：
 
