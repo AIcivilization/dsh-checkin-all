@@ -384,6 +384,43 @@ test('/credential GET 脱敏返回，POST/DELETE 需自定义头', async () => {
   }
 })
 
+test('/qoder GET 列表脱敏，POST 无效 PAT 返回错误', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dshmm-qoder-'))
+  const env = { ...process.env, HOME: dir, DSH_CHECKIN_ALL_HOME: join(dir, 'plugin') }
+  try {
+    await withServer(async (base) => {
+      // GET 空列表
+      const g = await fetch(`${base}/qoder`)
+      assert.equal(g.status, 200)
+      const gb = await g.json()
+      assert.equal(gb.ok, true)
+      assert.deepEqual(gb.qoders, [])
+      assert.ok(gb.regions.cn)
+
+      // POST 无效 PAT（会触发真实 exchangePat 调用，走网络会失败；这里验证「没 PAT 或过短」先被拦）
+      const p1 = await fetch(`${base}/qoder`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-dsh-checkin-all': '1' },
+        body: JSON.stringify({ pat: 'short', region: 'cn' }),
+      })
+      assert.equal(p1.status, 200)
+      const p1b = await p1.json()
+      assert.equal(p1b.ok, false)
+      assert.equal(p1b.code, 'QODER_INVALID_PAT')
+
+      // 缺自定义头 → 403
+      const p2 = await fetch(`${base}/qoder`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ pat: 'valid-pat-123', region: 'cn' }),
+      })
+      assert.equal(p2.status, 403)
+    }, { env })
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 // ── 客户端拼路径：曾经写成 BASE + path，api('status') 拼成 /api-dsh-checkin-allstatus → 404 ──
 
 test('client.js 的接口地址拼接：带不带前导斜杠都拼对', async () => {

@@ -263,6 +263,8 @@ POST {openApi}/sash/api/v1/me/campaigns/{id}/claim   幂等领取（重复返回
 - 凭据：**个人访问令牌（PAT）**，在面板里填，存 `~/.dsh/dsh-checkin-all/secrets.json`（0600）
 - 「今天」按**北京时间**算
 
+**获取 PAT**：打开 Qoder → 用量面板 / 设置 → 个人访问令牌，复制后粘贴到面板「Qoder 令牌」卡片（点卡片头部的「配置令牌」）。填 PAT、选区域（国内/海外）、可加备注名，点「添加令牌」会自动验证 PAT 是否有效。也支持多个令牌（多账号）。
+
 ### Trae
 
 Trae（国内版 / SOLO）的每日签到，读本机 Trae 桌面 App 或 CLI 的登录（`lib/providers/trae.js`）：

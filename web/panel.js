@@ -124,6 +124,7 @@ function renderDetail() {
   const canLogin = p.id === 'minimax'
   // 支持手动配置凭据的服务
   const canManual = ['lingxi', 'dumate', 'astudio', 'trae'].includes(p.id)
+  const isQoder = p.id === 'qoder'
   const manualHint = {
     lingxi: 'wps_sid 的值',
     dumate: '完整 Cookie 串（含 bce-user-info）',
@@ -138,6 +139,7 @@ function renderDetail() {
         <div class="head-actions">
           ${canLogin && !account.loggedIn ? '<button class="btn tiny" id="btn-login">登录</button>' : ''}
           ${canManual ? '<button class="btn tiny" id="btn-cred">配置凭据</button>' : ''}
+          ${isQoder ? '<button class="btn tiny" id="btn-qoder">配置令牌</button>' : ''}
           <button class="btn tiny primary" id="btn-checkin">立刻签到</button>
         </div>
       </div>
@@ -161,6 +163,35 @@ function renderDetail() {
       ${lastText ? `<div class="row"><span class="label">最近一次</span>
         <span class="value ${last.ok ? 'ok' : 'bad'}">${esc(lastText)}</span></div>` : ''}
     </section>
+
+    ${isQoder ? `
+    <section class="card" id="qoder-card">
+      <div class="card-head"><h2>Qoder 令牌</h2><span class="hint" id="qoder-status"></span></div>
+      <div class="field">
+        <p class="hint">Qoder 的签到需要「个人访问令牌（PAT）」。获取方式：打开 Qoder → 用量面板 / 设置 → 个人访问令牌，复制后粘贴到这里。国内版和海外版填不同的区域。</p>
+      </div>
+      <div class="field">
+        <label for="qoder-pat">个人访问令牌（PAT）</label>
+        <input type="password" id="qoder-pat" placeholder="粘贴 PAT">
+      </div>
+      <div class="field">
+        <label for="qoder-name">备注名（可选）</label>
+        <input type="text" id="qoder-name" placeholder="例如：主号 / 小号">
+      </div>
+      <div class="field">
+        <label for="qoder-region">区域</label>
+        <select id="qoder-region">
+          <option value="cn">国内版（openapi.qoder.com.cn）</option>
+          <option value="intl">海外版（openapi.qoder.sh）</option>
+        </select>
+      </div>
+      <div class="actions">
+        <button class="btn primary" id="btn-qoder-add">添加令牌</button>
+        <span id="qoder-msg" class="hint"></span>
+      </div>
+      <div id="qoder-list" class="field"></div>
+    </section>
+    ` : ''}
 
     ${canManual ? `
     <section class="card" id="cred-card">
@@ -225,6 +256,15 @@ function renderDetail() {
   const loginBtn = $('#btn-login')
   if (loginBtn) loginBtn.onclick = () => startLogin(p.id)
 
+  // Qoder 令牌配置
+  const qoderBtn = $('#btn-qoder')
+  const qoderCard = $('#qoder-card')
+  if (qoderCard && qoderBtn) {
+    qoderBtn.onclick = () => { qoderCard.scrollIntoView({ behavior: 'smooth', block: 'center' }) }
+    $('#btn-qoder-add').onclick = () => addQoderPat()
+    loadQoderList()
+  }
+
   // 手动凭据配置
   const credBtn = $('#btn-cred')
   const credCard = $('#cred-card')
@@ -239,6 +279,72 @@ function renderDetail() {
   const cached = PANELS.get(p.id)
   if (cached) renderWeek(cached)
   else loadPanel(p.id)
+}
+
+/** 加载 Qoder 令牌列表（脱敏显示） */
+async function loadQoderList() {
+  const box = $('#qoder-list')
+  const status = $('#qoder-status')
+  if (!box) return
+  try {
+    const r = await api('/qoder')
+    if (!r.ok) { box.innerHTML = `<span class="muted">${esc(r.message || '读取失败')}</span>`; return }
+    const qoders = r.qoders || []
+    if (status) status.textContent = qoders.length ? `已配置 ${qoders.length} 个令牌` : '未配置'
+    if (!qoders.length) { box.innerHTML = '<span class="muted">还没有配置令牌</span>'; return }
+    box.innerHTML = qoders.map((q) => `
+      <div class="row">
+        <span class="label">${esc(q.name || `#${q.id}`)} · ${q.region === 'intl' ? '海外' : '国内'}</span>
+        <span class="value">
+          <button class="btn tiny" data-qoder-del="${esc(q.id)}">删除</button>
+        </span>
+      </div>`).join('')
+    for (const btn of box.querySelectorAll('[data-qoder-del]')) {
+      btn.onclick = () => removeQoderPat(btn.dataset.qoderDel)
+    }
+  } catch (e) {
+    box.innerHTML = `<span class="muted">${esc(e.message)}</span>`
+  }
+}
+
+/** 添加 Qoder PAT（服务端会先验证 PAT 有效性） */
+async function addQoderPat() {
+  const msg = $('#qoder-msg')
+  const pat = $('#qoder-pat').value.trim()
+  const name = $('#qoder-name').value.trim()
+  const region = $('#qoder-region').value
+  if (!pat) { if (msg) msg.textContent = '请输入 PAT'; return }
+  try {
+    const r = await api('/qoder', { method: 'POST', body: { pat, name, region } })
+    if (r.ok) {
+      if (msg) { msg.textContent = '已添加'; setTimeout(() => { if (msg) msg.textContent = '' }, 2500) }
+      $('#qoder-pat').value = ''
+      $('#qoder-name').value = ''
+      loadQoderList()
+      await refresh({ withPanels: false })
+    } else if (msg) {
+      msg.textContent = r.message || '添加失败'
+    }
+  } catch (e) {
+    if (msg) msg.textContent = `添加失败：${e.message}`
+  }
+}
+
+/** 删除 Qoder PAT */
+async function removeQoderPat(id) {
+  const msg = $('#qoder-msg')
+  try {
+    const r = await api(`/qoder?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
+    if (r.ok) {
+      if (msg) { msg.textContent = '已删除'; setTimeout(() => { if (msg) msg.textContent = '' }, 2500) }
+      loadQoderList()
+      await refresh({ withPanels: false })
+    } else if (msg) {
+      msg.textContent = r.message || '删除失败'
+    }
+  } catch (e) {
+    if (msg) msg.textContent = `删除失败：${e.message}`
+  }
 }
 
 /** 读某个服务的手动凭据状态（脱敏，只显示「已配置」） */
