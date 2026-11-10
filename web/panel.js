@@ -33,8 +33,52 @@ async function api(path, { method = 'GET', body } = {}) {
 /* ── 状态 ── */
 
 let STATUS = null
-let CURRENT = ''        // 当前选中的服务 id
+// 空字符串 = 只看卡片（首页）；点了某张卡才有值 → 显示该服务详情
+let CURRENT = ''
 const PANELS = new Map() // id -> 签到表（缓存，切回不闪）
+
+/* ── 界面偏好（存 localStorage）── */
+const PREFS_KEY = 'dsh-checkin-all:prefs'
+
+/** 哪些服务被用户手动折叠/展开 */
+function loadPrefs() {
+  try {
+    const raw = localStorage.getItem(PREFS_KEY)
+    const j = raw ? JSON.parse(raw) : {}
+    return {
+      order: Array.isArray(j.order) ? j.order : [],        // 自定义排序（id 数组）
+      collapsed: j.collapsed && typeof j.collapsed === 'object' ? j.collapsed : {}, // id -> true/false
+      autoCollapse: j.autoCollapse !== false,              // 默认自动折叠「不用关注」的
+    }
+  } catch {
+    return { order: [], collapsed: {}, autoCollapse: true }
+  }
+}
+function savePrefs(next) {
+  try { localStorage.setItem(PREFS_KEY, JSON.stringify(next)) } catch { /* 隐私模式就算了 */ }
+}
+let PREFS = loadPrefs()
+
+/** 「不用关注」的服务：自动折起来，省地方 */
+function isIdle(p) {
+  const st = p.state || {}
+  if (!p.account || !p.account.loggedIn) return true          // 未登录
+  if (!p.config || !p.config.enabled) return true             // 自动签到关着
+  const last = st.lastAttempt
+  const outcome = (last && last.outcome) || ''
+  if (outcome === 'no_task' || outcome === 'not_yet') return true  // 没这玩法 / 还没到轮次
+  return false
+}
+
+/** 按用户排序排好，没排过的保持原顺序跟在后面 */
+function orderedProviders(list) {
+  const rank = new Map(PREFS.order.map((id, i) => [id, i]))
+  return [...list].sort((a, b) => {
+    const ra = rank.has(a.id) ? rank.get(a.id) : Number.MAX_SAFE_INTEGER
+    const rb = rank.has(b.id) ? rank.get(b.id) : Number.MAX_SAFE_INTEGER
+    return ra - rb
+  })
+}
 
 let bannerTimer = 0
 function banner(text, kind = 'info', action) {
@@ -60,73 +104,160 @@ function providerOf(id) {
   return (STATUS && STATUS.providers || []).find(p => p.id === id) || null
 }
 
+/** 一张卡片（两行紧凑布局） */
+function cardHTML(p, { dragging = false } = {}) {
+  const st = p.state || {}
+  const last = st.lastAttempt
+  const todayDone = st.claimedToday
+  const on = p.config && p.config.enabled
+  const lastOutcome = (last && last.outcome) || ''
+  const benign = lastOutcome === 'no_task' || lastOutcome === 'not_yet'
+  const needsLogin = lastOutcome === 'needs_login'
+  const loggedIn = Boolean(p.account && p.account.loggedIn)
+
+  const loginMark = loggedIn
+    ? '<span class="cmark ok" aria-hidden="true">✓</span>'
+    : '<span class="cmark bad" aria-hidden="true">✗</span>'
+  const loginText = loggedIn
+    ? '已登录'
+    : needsLogin ? '已过期'
+      : (p.account && p.account.label === '登录已过期') ? '已过期'
+        : '未登录'
+
+  let checkMark
+  let checkText
+  if (!loggedIn) {
+    checkMark = '<span class="cmark idle" aria-hidden="true">–</span>'
+    checkText = '无法签'
+  } else if (todayDone) {
+    checkMark = '<span class="cmark ok" aria-hidden="true">✓</span>'
+    checkText = last && last.points > 0 ? `已签 +${last.points}` : '已签'
+  } else if (benign) {
+    checkMark = '<span class="cmark idle" aria-hidden="true">–</span>'
+    checkText = lastOutcome === 'no_task' ? '无任务' : '未到轮次'
+  } else if (last && !last.ok) {
+    checkMark = '<span class="cmark bad" aria-hidden="true">✗</span>'
+    checkText = '上次失败'
+  } else {
+    checkMark = '<span class="cmark warn" aria-hidden="true">○</span>'
+    checkText = '未签'
+  }
+
+  const streakText = st.streak ? `连续 ${st.streak} 天` : ''
+  return `<div class="icard${p.id === CURRENT ? ' on' : ''}${dragging ? ' dragging' : ''}"
+      data-id="${esc(p.id)}" draggable="true" style="--brand:${esc(p.color)}"
+      role="button" tabindex="0"
+      title="${esc(p.name)}｜${esc(loginText)}｜${esc(checkText)}${st.streak ? `｜连续 ${st.streak} 天` : ''}${on ? `｜每天 ${esc(p.config.time)}` : '｜自动签到已关闭'}">
+    <div class="ihead">
+      <span class="iname">${esc(p.short)}</span>
+      <span class="istreak">${esc(streakText)}</span>
+    </div>
+    <div class="istat">
+      <span class="istat-item">${loginMark}<span class="itxt">${esc(loginText)}</span></span>
+      <span class="istat-item">${checkMark}<span class="itxt">${esc(checkText)}</span></span>
+    </div>
+  </div>`
+}
+
 function renderIndex() {
   const box = $('#index')
-  const list = (STATUS && STATUS.providers) || []
-  if (!list.length) {
+  const all = (STATUS && STATUS.providers) || []
+  if (!all.length) {
     box.innerHTML = '<div class="index-loading muted">没有可用的签到服务</div>'
     return
   }
-  box.innerHTML = list.map(p => {
-    const st = p.state || {}
-    const last = st.lastAttempt
-    const todayDone = st.claimedToday
-    const on = p.config && p.config.enabled
-    const lastOutcome = (last && last.outcome) || ''
-    // no_task / not_yet 不是故障：账号没这玩法，或今天还没到轮次
-    const benign = lastOutcome === 'no_task' || lastOutcome === 'not_yet'
-    const needsLogin = lastOutcome === 'needs_login'
-    const loggedIn = Boolean(p.account && p.account.loggedIn)
 
-    // ① 登录状态：✓ 已登录 / ✗ 未登录 / ✗ 登录已过期
-    const loginMark = loggedIn
-      ? '<span class="cmark ok" aria-hidden="true">✓</span>'
-      : '<span class="cmark bad" aria-hidden="true">✗</span>'
-    const loginText = loggedIn
-      ? '已登录'
-      : needsLogin ? '已过期'
-        : (p.account && p.account.label === '登录已过期') ? '已过期'
-          : '未登录'
-
-    // ② 今日签到：✓ 已签 / ○ 还没签 / – 不用签 / ✗ 失败
-    let checkMark
-    let checkText
-    if (!loggedIn) {
-      checkMark = '<span class="cmark idle" aria-hidden="true">–</span>'
-      checkText = '无法签'
-    } else if (todayDone) {
-      checkMark = '<span class="cmark ok" aria-hidden="true">✓</span>'
-      checkText = last && last.points > 0 ? `已签 +${last.points}` : '已签'
-    } else if (benign) {
-      checkMark = '<span class="cmark idle" aria-hidden="true">–</span>'
-      checkText = lastOutcome === 'no_task' ? '无任务' : '未到轮次'
-    } else if (last && !last.ok) {
-      checkMark = '<span class="cmark bad" aria-hidden="true">✗</span>'
-      checkText = '上次失败'
-    } else {
-      checkMark = '<span class="cmark warn" aria-hidden="true">○</span>'
-      checkText = '未签'
-    }
-
-    // 右上角：连续天数。没有连续记录时留一个淡淡的占位，别显示时间
-    // （时间在详情页和 tooltip 里有，这里放会让人误以为是签到时间）
-    const streakText = st.streak ? `连续 ${st.streak} 天` : ''
-    return `<button type="button" class="icard${p.id === CURRENT ? ' on' : ''}" data-id="${esc(p.id)}"
-        style="--brand:${esc(p.color)}"
-        title="${esc(p.name)}｜${esc(loginText)}｜${esc(checkText)}${st.streak ? `｜连续 ${st.streak} 天` : ''}${on ? `｜每天 ${esc(p.config.time)}` : '｜自动签到已关闭'}">
-      <div class="ihead">
-        <span class="iname">${esc(p.short)}</span>
-        <span class="istreak">${esc(streakText)}</span>
-      </div>
-      <div class="istat">
-        <span class="istat-item">${loginMark}<span class="itxt">${esc(loginText)}</span></span>
-        <span class="istat-item">${checkMark}<span class="itxt">${esc(checkText)}</span></span>
-      </div>
-    </button>`
-  }).join('')
-  for (const btn of box.querySelectorAll('.icard')) {
-    btn.onclick = () => select(btn.dataset.id)
+  const list = orderedProviders(all)
+  // 分两组：需要关注的（展开）/ 不用关注的（可折叠）
+  const active = []
+  const idle = []
+  for (const p of list) {
+    const userSays = PREFS.collapsed[p.id]           // true=手动折叠 / false=手动展开
+    const shouldCollapse = userSays === undefined
+      ? (PREFS.autoCollapse && isIdle(p))
+      : userSays === true
+    if (shouldCollapse) idle.push(p)
+    else active.push(p)
   }
+
+  const idleCollapsed = idle.length > 0 && PREFS.collapsed.__idle !== false
+
+  box.innerHTML = `
+    <div class="igroup">${active.map(p => cardHTML(p)).join('')}</div>
+    ${idle.length ? `
+      <button type="button" class="igroup-toggle" id="idle-toggle" aria-expanded="${!idleCollapsed}">
+        <span class="chev">${idleCollapsed ? '▸' : '▾'}</span>
+        ${idleCollapsed ? `已折叠 ${idle.length} 个（不用关注）` : `收起 ${idle.length} 个不用关注的`}
+      </button>
+      <div class="igroup${idleCollapsed ? ' hidden' : ''}" id="idle-group">
+        ${idle.map(p => cardHTML(p)).join('')}
+      </div>
+    ` : ''}
+    <button type="button" class="igroup-add" id="btn-add-service" title="把「添加新签到服务」的提示词发到对话里">＋ 添加签到服务</button>
+  `
+
+  // 点击卡片 → 看详情
+  for (const el of box.querySelectorAll('.icard')) {
+    el.onclick = () => select(el.dataset.id)
+    el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(el.dataset.id) } }
+  }
+  const toggle = $('#idle-toggle')
+  if (toggle) {
+    toggle.onclick = () => {
+      const nowCollapsed = PREFS.collapsed.__idle === false   // 当前是展开的 → 要收起
+      PREFS.collapsed.__idle = nowCollapsed ? true : false
+      savePrefs(PREFS)
+      renderIndex()
+    }
+  }
+  const addBtn = $('#btn-add-service')
+  if (addBtn) addBtn.onclick = () => showAddServicePrompt()
+  wireDrag(box)
+}
+
+/** 拖动排序：拖到另一张卡上就换位，松手存顺序 */
+function wireDrag(box) {
+  let dragId = ''
+  const cards = [...box.querySelectorAll('.icard')]
+  for (const el of cards) {
+    el.addEventListener('dragstart', (e) => {
+      dragId = el.dataset.id
+      el.classList.add('dragging')
+      try { e.dataTransfer.setData('text/plain', dragId); e.dataTransfer.effectAllowed = 'move' } catch { /* 忽略 */ }
+    })
+    el.addEventListener('dragend', () => {
+      dragId = ''
+      for (const c of box.querySelectorAll('.icard')) c.classList.remove('dragging', 'drop-target')
+    })
+    el.addEventListener('dragover', (e) => {
+      if (!dragId || el.dataset.id === dragId) return
+      e.preventDefault()
+      el.classList.add('drop-target')
+    })
+    el.addEventListener('dragleave', () => el.classList.remove('drop-target'))
+    el.addEventListener('drop', (e) => {
+      e.preventDefault()
+      el.classList.remove('drop-target')
+      const from = dragId || e.dataTransfer?.getData('text/plain')
+      const to = el.dataset.id
+      if (!from || from === to) return
+      reorder(from, to)
+    })
+  }
+}
+
+/** 把 from 挪到 to 的位置 */
+function reorder(from, to) {
+  const all = (STATUS && STATUS.providers) || []
+  const ids = orderedProviders(all).map(p => p.id)
+  const i = ids.indexOf(from)
+  const j = ids.indexOf(to)
+  if (i < 0 || j < 0) return
+  ids.splice(i, 1)
+  ids.splice(j, 0, from)
+  PREFS.order = ids
+  savePrefs(PREFS)
+  renderIndex()
 }
 
 /* ── 详情：和原来那张卡一致 ── */
@@ -134,10 +265,15 @@ function renderIndex() {
 function renderDetail() {
   const p = providerOf(CURRENT)
   const box = $('#detail')
+  // 没选中 → 首页模式：详情整块隐藏，只留卡片
   if (!p) {
-    box.innerHTML = '<div class="detail-loading muted">选一个签到服务</div>'
+    box.innerHTML = ''
+    box.classList.add('hidden')
+    document.body.classList.add('cards-only')
     return
   }
+  box.classList.remove('hidden')
+  document.body.classList.remove('cards-only')
   const st = p.state || {}
   const account = p.account || {}
   const minutes = account.loggedIn ? Math.round((account.expiresInSec || 0) / 60) : 0
@@ -832,14 +968,15 @@ async function refresh({ withPanels = true } = {}) {
   try {
     const status = await api('/status')
     STATUS = status
-    if (!CURRENT || !providerOf(CURRENT)) {
-      CURRENT = (status.providers && status.providers[0] && status.providers[0].id) || ''
-    }
+    // 选中的服务没了就回到首页（不再自动选第一个）
+    if (CURRENT && !providerOf(CURRENT)) CURRENT = ''
     $('#version').textContent = status.version ? `v${status.version}` : ''
     const p = providerOf(CURRENT)
     $('#subtitle').textContent = p
       ? `${p.name}${p.config && p.config.enabled ? ` · 每天 ${p.config.time}` : ' · 自动签到已关'}`
       : '每天自动领积分'
+    // 首页只显示卡片时，标题可点回卡片视图
+    document.body.classList.toggle('cards-only', !p)
     renderIndex()
     renderDetail()
     if (withPanels && p) {
@@ -862,14 +999,22 @@ async function refresh({ withPanels = true } = {}) {
   }
 }
 
+/** 点卡片看详情；再点同一张（或点标题）回卡片视图 */
 function select(id) {
-  if (!id || id === CURRENT) return
-  CURRENT = id
+  const next = (id === CURRENT) ? '' : id
+  CURRENT = next || ''
   hideBanner()
   renderIndex()
   renderDetail()
-  const p = providerOf(id)
-  if (p) $('#subtitle').textContent = `${p.name}${p.config && p.config.enabled ? ` · 每天 ${p.config.time}` : ' · 自动签到已关'}`
+  const p = providerOf(CURRENT)
+  document.body.classList.toggle('cards-only', !p)
+  if (p) {
+    $('#subtitle').textContent = `${p.name}${p.config && p.config.enabled ? ` · 每天 ${p.config.time}` : ' · 自动签到已关'}`
+    // 进详情时滚到顶部，免得还要手动找
+    try { window.scrollTo({ top: 0, behavior: 'smooth' }) } catch { /* 忽略 */ }
+  } else {
+    $('#subtitle').textContent = '每天自动领积分'
+  }
 }
 
 async function checkin(id) {
@@ -1036,3 +1181,114 @@ $('#copy-code').onclick = async () => {
 refresh()
 // 面板开着的时候每分钟对一次表（App 那边也可能刚签过）
 setInterval(() => { if (!document.hidden) void refresh({ withPanels: false }) }, 60_000)
+
+/* ── 添加签到服务 ── */
+
+/** 打开「添加服务」弹窗 */
+async function showAddServicePrompt() {
+  const box = $('#addsvc')
+  if (!box) return
+  box.classList.remove('hidden')
+  switchTab('ai')
+  try {
+    const r = await api('/custom', { method: 'POST', body: { prompt: true } })
+    if (r.ok && $('#addsvc-prompt')) $('#addsvc-prompt').value = r.prompt || ''
+  } catch (e) {
+    if ($('#prompt-msg')) $('#prompt-msg').textContent = `取提示词失败：${e.message}`
+  }
+  loadCustomList()
+}
+
+function switchTab(name) {
+  for (const t of document.querySelectorAll('.tab')) t.classList.toggle('on', t.dataset.tab === name)
+  for (const id of ['ai', 'manual']) {
+    const el = $(`#tab-${id}`)
+    if (el) el.classList.toggle('hidden', id !== name)
+  }
+}
+
+/** 已导入的自定义服务列表 */
+async function loadCustomList() {
+  const box = $('#custom-list')
+  if (!box) return
+  try {
+    const r = await api('/custom')
+    const list = r.services || []
+    if (!list.length) { box.innerHTML = '<span class="muted">还没有自定义服务</span>'; return }
+    box.innerHTML = list.map((s) => `
+      <div class="row">
+        <span class="label">${esc(s.name)}（${esc(s.id)}）</span>
+        <span class="value"><button class="btn tiny" data-custom-del="${esc(s.id)}">删除</button></span>
+      </div>`).join('')
+    for (const btn of box.querySelectorAll('[data-custom-del]')) {
+      btn.onclick = () => removeCustomService(btn.dataset.customDel)
+    }
+  } catch (e) {
+    box.innerHTML = `<span class="muted">${esc(e.message)}</span>`
+  }
+}
+
+/** 导入一段定义 */
+async function importCustomService() {
+  const ta = $('#addsvc-json')
+  const msg = $('#import-msg')
+  const text = ta ? ta.value.trim() : ''
+  if (!text) { if (msg) msg.textContent = '先把 JSON 粘进来'; return }
+  if (msg) msg.textContent = '导入中…'
+  try {
+    const r = await api('/custom', { method: 'POST', body: { text } })
+    if (r.ok) {
+      if (msg) msg.textContent = `已导入「${r.service?.name || r.id}」，卡片已出现`
+      if (ta) ta.value = ''
+      loadCustomList()
+      await refresh({ withPanels: false })
+    } else if (msg) {
+      msg.textContent = r.message || '导入失败'
+    }
+  } catch (e) {
+    if (msg) msg.textContent = `导入失败：${e.message}`
+  }
+}
+
+/** 删一个自定义服务 */
+async function removeCustomService(id) {
+  const msg = $('#import-msg')
+  try {
+    const r = await api(`/custom?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
+    if (r.ok) {
+      if (msg) msg.textContent = '已删除'
+      loadCustomList()
+      await refresh({ withPanels: false })
+    } else if (msg) {
+      msg.textContent = r.message || '删除失败'
+    }
+  } catch (e) {
+    if (msg) msg.textContent = `删除失败：${e.message}`
+  }
+}
+
+/* 弹窗事件 */
+for (const t of document.querySelectorAll('.tab')) {
+  t.onclick = () => switchTab(t.dataset.tab)
+}
+if ($('#addsvc-close')) $('#addsvc-close').onclick = () => $('#addsvc').classList.add('hidden')
+if ($('#addsvc')) {
+  $('#addsvc').onclick = (e) => { if (e.target.id === 'addsvc') $('#addsvc').classList.add('hidden') }
+}
+if ($('#btn-copy-prompt')) {
+  $('#btn-copy-prompt').onclick = async () => {
+    const ta = $('#addsvc-prompt')
+    const msg = $('#prompt-msg')
+    try {
+      await navigator.clipboard.writeText(ta.value)
+      if (msg) { msg.textContent = '已复制，去对话里粘贴'; setTimeout(() => { if (msg) msg.textContent = '' }, 3000) }
+    } catch {
+      ta.select()
+      if (msg) msg.textContent = '自动复制失败，已选中，按 Cmd+C 复制'
+    }
+  }
+}
+if ($('#btn-import-svc')) $('#btn-import-svc').onclick = () => importCustomService()
+
+/* 点标题回卡片视图 */
+if ($('#back-home')) $('#back-home').onclick = () => select('')

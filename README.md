@@ -112,6 +112,70 @@ node bin/dsh-checkin-all.js unset lingxi   # 删除某个服务的手动凭据�
 
 服务名：`minimax`（MiniMax Code）/ `lingxi`（WPS 灵犀）/ `dumate`（百度 DuMate）/ `astudio`（AStudio）/ `qoder`（Qoder）/ `trae`（Trae）/ `doubao`（豆包）/ `codearts`（华为 CodeArts）/ `buddy`（腾讯 WorkBuddy）
 
+## 加新的签到服务（不写代码）
+
+内置 9 个服务，但外面还有一堆能签到的站点。面板底部有个 **「＋ 添加签到服务」**，
+点开有两条路：
+
+### 方式一：让 DSH 的 AI 帮你做（推荐）
+
+1. 点「添加签到服务」→ 复制那段提示词
+2. 粘到 DSH 对话里，告诉 AI 是哪个 App / 网站、本机哪里登录着
+3. AI 帮你查接口，最后给一段 JSON
+4. 回来切到「粘贴定义」，把 JSON 整段贴进去 → 导入
+
+导入后**立刻变成一张新卡片**，和内置服务一样参与自动签到。
+
+### 方式二：自己写定义
+
+如果你已经知道接口长什么样，直接粘这份 JSON：
+
+```json
+{
+  "id": "kuaKe",
+  "name": "夸克网盘",
+  "short": "夸克",
+  "color": "#0ea5e9",
+  "unit": "积分",
+  "checkin": {
+    "method": "POST",
+    "url": "https://example.com/api/checkin",
+    "headers": { "referer": "https://example.com/", "cookie": "{{cookie}}" },
+    "body": { "type": "daily" }
+  },
+  "status": {
+    "method": "GET",
+    "url": "https://example.com/api/status",
+    "claimedPath": "data.checked_in_today",
+    "pointsPath": "data.today_points"
+  },
+  "successPath": "code",
+  "successValue": 0,
+  "alreadyPath": "data.already",
+  "messagePath": "message"
+}
+```
+
+字段说明：
+
+| 字段 | 说明 |
+|---|---|
+| `id` | 唯一标识，字母开头，字母数字下划线连字符，2~32 位，不能和内置重名 |
+| `short` / `color` / `unit` | 卡片上的名字、品牌色、积分单位 |
+| `checkin` | 签到请求：method / url / headers / body |
+| `status` | 状态查询（可选）：怎么看出今天签没签、得了多少 |
+| `claimedPath` | 从响应里取「今天签没签」的路径，如 `data.checked_in_today` |
+| `pointsPath` | 从响应里取「今天得了多少」 |
+| `successPath` / `successValue` | 成功的判据，如 `code` 等于 `0` |
+| `alreadyPath` | 这个字段为 true 表示今天已签（跳过重复请求） |
+
+**路径写法**：点号分隔，数组下标用 `[0]`，例如 `data.list[0].status`。
+
+**凭据**：在卡片详情的「账号」里填，字段名随便叫（`cookie` / `token` / `key`），
+然后在 `url` / `headers` / `body` 里用 `{{字段名}}` 引用。这样一份定义能配多个账号。
+
+定义存在 `~/.dsh/dsh-checkin-all/custom-services.json`（0600），可以随时删。
+
 ## 多账号
 
 **每个服务都能配多个账号**，签到时会逐个签，结果分别汇报。

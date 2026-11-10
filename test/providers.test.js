@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, rm, writeFile, mkdir, readFile } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile, mkdir, readFile, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -1042,4 +1042,82 @@ test('多账号汇总：单账号时消息不啰嗦', () => {
     { ok: true, label: '主号', result: { ok: true, outcome: OUTCOME.CLAIMED, points: 100, message: '签到成功 +100' } },
   ], { unit: '智点' })
   assert.equal(r.message, '签到成功 +100', '单账号不要加 N/N 前缀')
+})
+
+// ── 自定义签到服务（AI 做完导入成卡片）──
+
+import {
+  normalizeCustomService, upsertCustomService, loadCustomServices,
+  removeCustomService, pickPath, buildAddServicePrompt, CustomServiceError, BUILTIN_IDS,
+} from '../lib/custom-services.js'
+import { createProvidersAsync } from '../lib/providers/index.js'
+
+test('自定义服务：pickPath 支持点号和数组下标', () => {
+  const obj = { data: { list: [{ ok: true, pts: 10 }, { ok: false }], nested: { deep: 'x' } }, code: 0 }
+  assert.equal(pickPath(obj, 'code'), 0)
+  assert.equal(pickPath(obj, 'data.nested.deep'), 'x')
+  assert.equal(pickPath(obj, 'data.list[0].ok'), true)
+  assert.equal(pickPath(obj, 'data.list[1].ok'), false)
+  assert.equal(pickPath(obj, 'data.list[5].ok'), undefined)
+  assert.equal(pickPath(obj, 'nope.deep'), undefined)
+  assert.equal(pickPath(obj, ''), undefined)
+})
+
+test('自定义服务：定义校验（非法 id / 重名 / 坏 URL 都要拒）', () => {
+  assert.throws(() => normalizeCustomService({ id: 'x', checkin: { url: 'https://a.com' } }), CustomServiceError)
+  assert.throws(() => normalizeCustomService({ id: '1abc', checkin: { url: 'https://a.com' } }), CustomServiceError)
+  assert.throws(() => normalizeCustomService({ id: 'minimax', checkin: { url: 'https://a.com' } }), /重名/)
+  assert.throws(() => normalizeCustomService({ id: 'okId', checkin: { url: 'ftp://a.com' } }), /http/)
+  assert.throws(() => normalizeCustomService({ id: 'okId' }), /checkin/)
+  // 合法的能过
+  const ok = normalizeCustomService({ id: 'okId', checkin: { url: 'https://a.com/x' } })
+  assert.equal(ok.id, 'okId')
+  assert.equal(ok.checkin.method, 'POST', '默认 POST')
+  assert.equal(ok.unit, '积分', '默认单位')
+  assert.ok(BUILTIN_IDS.has('minimax'))
+})
+
+test('自定义服务：导入后出现在卡片列表里', async () => {
+  const home = await mkdtemp2(join2(tmpdir2(), 'cs-'))
+  const env = { ...process.env, DSH_CHECKIN_ALL_HOME: home }
+  await upsertCustomService({
+    id: 'demoSite', name: '演示', short: '演示', color: '#10b981',
+    checkin: { method: 'POST', url: 'https://demo.example.com/signin' },
+    successPath: 'code',
+  }, env)
+
+  const providers = await createProvidersAsync({ log: () => {}, env })
+  const meta = providers.meta()
+  assert.equal(meta.length, 10, '9 内置 + 1 自定义')
+  const card = meta.find(m => m.id === 'demoSite')
+  assert.ok(card, '自定义卡片要出现')
+  assert.equal(card.short, '演示')
+  assert.equal(card.custom, true, '要标记成自定义，面板才能删')
+})
+
+test('自定义服务：删除后卡片消失', async () => {
+  const home = await mkdtemp2(join2(tmpdir2(), 'cs2-'))
+  const env = { ...process.env, DSH_CHECKIN_ALL_HOME: home }
+  await upsertCustomService({ id: 'tempSite', checkin: { url: 'https://a.com/x' } }, env)
+  assert.equal((await loadCustomServices(env)).length, 1)
+  assert.equal(await removeCustomService('tempSite', env), true)
+  assert.equal((await loadCustomServices(env)).length, 0)
+  // 删不存在的返回 false
+  assert.equal(await removeCustomService('nope', env), false)
+})
+
+test('自定义服务：提示词包含 JSON 模板和内置 id 提醒', () => {
+  const p = buildAddServicePrompt({ existingIds: ['minimax', 'lingxi'] })
+  assert.match(p, /"checkin"\s*:/, '要有 checkin 模板')
+  assert.match(p, /"successPath"/, '要有成功判定字段')
+  assert.match(p, /minimax/, '要提醒别和内置重名')
+  assert.match(p, /data\.list\[0\]/, '要说明数组下标写法')
+})
+
+test('自定义服务：凭据目录权限 600', async () => {
+  const home = await mkdtemp2(join2(tmpdir2(), 'cs3-'))
+  const env = { ...process.env, DSH_CHECKIN_ALL_HOME: home }
+  await upsertCustomService({ id: 'permSite', checkin: { url: 'https://a.com/x' } }, env)
+  const st = await stat(join2(home, 'custom-services.json'))
+  assert.equal((st.mode & 0o777).toString(8), '600')
 })

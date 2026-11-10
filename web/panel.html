@@ -12,7 +12,7 @@
 
   <!-- 顶部索引：每个签到服务一张卡，点一下切到下面那页 -->
   <header class="head">
-    <div class="head-title">
+    <div class="head-title" id="back-home" role="button" tabindex="0" title="点一下回到全部卡片">
       <span class="logo">✓</span>
       <div>
         <h1>自动签到</h1>
@@ -50,6 +50,42 @@
     <p id="login-status" class="hint">等待确认…</p>
     <div class="actions">
       <button id="login-close" class="btn">关闭</button>
+    </div>
+  </div>
+</section>
+
+<section id="addsvc" class="modal hidden">
+  <div class="modal-box wide">
+    <h3>添加签到服务</h3>
+    <p class="muted">两种方式：让 DSH 的 AI 帮你查接口，或者你已经知道接口就直接粘贴定义。</p>
+
+    <div class="tabs">
+      <button type="button" class="tab on" data-tab="ai">让 AI 帮我做</button>
+      <button type="button" class="tab" data-tab="manual">粘贴定义</button>
+    </div>
+
+    <div id="tab-ai" class="tabpane">
+      <p class="hint">复制下面这段，发到 DSH 对话里。AI 会问你细节、帮你查接口，最后给一段 JSON。</p>
+      <textarea id="addsvc-prompt" rows="7" readonly></textarea>
+      <div class="actions">
+        <button class="btn primary" id="btn-copy-prompt">复制提示词</button>
+        <span id="prompt-msg" class="hint"></span>
+      </div>
+      <p class="hint">拿到 AI 给的 JSON 后，切到「粘贴定义」贴进来。</p>
+    </div>
+
+    <div id="tab-manual" class="tabpane hidden">
+      <p class="hint">把 AI 给的 JSON 整段粘进来（前后有说明文字也没关系，会自动找出 { … }）。</p>
+      <textarea id="addsvc-json" rows="9" placeholder='{"id":"kuaKe","name":"夸克网盘","checkin":{"method":"POST","url":"https://..."}}'></textarea>
+      <div class="actions">
+        <button class="btn primary" id="btn-import-svc">导入</button>
+        <span id="import-msg" class="hint"></span>
+      </div>
+      <div id="custom-list" class="field"></div>
+    </div>
+
+    <div class="actions end">
+      <button class="btn" id="addsvc-close">关闭</button>
     </div>
   </div>
 </section>
