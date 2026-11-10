@@ -735,3 +735,33 @@ test('索引卡片：未登录', () => {
   assert.equal(c.loginText, '未登录')
   assert.equal(c.checkText, '无法签到')
 })
+
+// ── 详情卡片折叠 ──
+
+test('详情折叠：除第一张概览卡外都可折叠，且默认折叠', async () => {
+  // 直接从源码里核对 makeCollapsible 的规则，避免以后被改坏
+  const src = await readFile('/Users/wf/dsh/dsh-checkin-all/web/panel.js', 'utf8')
+
+  // 1) 第一张卡跳过
+  assert.match(src, /if \(idx === 0\) return/, '概览卡不该被折叠')
+  // 2) 默认折叠
+  assert.match(src, /let open = false/, '默认应该是折叠（open=false）')
+  // 3) 有橙色三角
+  assert.match(src, /className = 'chev'/, '要有三角箭头')
+  assert.match(src, /'▸'/, '折叠态用 ▸')
+  assert.match(src, /'▾'/, '展开态用 ▾')
+  // 4) 折叠样式挂在 card 上
+  assert.match(src, /classList\.toggle\('collapsed'/, '要用 collapsed 类控制显示')
+})
+
+test('详情折叠：CSS 里三角是橙色、折叠时隐藏内容', async () => {
+  const css = await readFile('/Users/wf/dsh/dsh-checkin-all/web/panel.css', 'utf8')
+  assert.match(css, /\.card-head\.collapsible-head \.chev[\s\S]{0,200}color:\s*var\(--warn\)/, '三角要用橙色（--warn）')
+  assert.match(css, /\.card\.collapsed \.card-body\s*\{\s*display:\s*none/, '折叠时内容要隐藏')
+  assert.match(css, /justify-content:\s*flex-start/, '三角插到前面后要改左对齐')
+})
+
+test('详情折叠：head 里的按钮不会误触发折叠', async () => {
+  const src = await readFile('/Users/wf/dsh/dsh-checkin-all/web/panel.js', 'utf8')
+  assert.match(src, /e\.target\.closest\('button'\)/, '点刷新等按钮时不该折叠卡片')
+})

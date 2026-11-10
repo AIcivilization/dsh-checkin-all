@@ -354,3 +354,37 @@ body.cards-only .head-title:hover { opacity: 1; }
 /* 首页只显示卡片时，详情区不留白 */
 .detail.hidden { display: none; }
 body.cards-only .foot { padding-bottom: 12px; }
+
+/* ── 详情卡片折叠 ── */
+/* 概览卡（第一张）保持原样；其余可折叠，橙色三角提示可点 */
+.card-head.collapsible-head {
+  cursor: pointer;
+  user-select: none;
+  margin: -2px 0 0;
+  padding: 2px 0;
+  gap: 6px;
+  /* 三角 + 标题靠左，右侧按钮仍然贴右 */
+  justify-content: flex-start;
+}
+/* 标题吃掉中间空间，把右侧按钮推到最右 */
+.card-head.collapsible-head h2 { flex: 1 1 auto; min-width: 0; }
+.card-head.collapsible-head > .btn,
+.card-head.collapsible-head > .hint { flex: none; }
+.card-head.collapsible-head:hover .chev { color: var(--warn); transform: translateX(1px); }
+.card-head.collapsible-head .chev {
+  display: inline-grid;
+  place-items: center;
+  width: 14px; height: 14px;
+  font-size: 9px;
+  line-height: 1;
+  color: var(--warn);
+  flex: none;
+  transition: color .15s, transform .12s;
+}
+/* 折叠态：卡片收成一行，只留标题 */
+.card.collapsed { padding-bottom: 10px; }
+.card.collapsed .card-body { display: none; }
+.card.collapsed .card-head { margin-bottom: 0; }
+/* 折叠时右侧的操作按钮（刷新等）仍可点，但视觉上淡一点 */
+.card.collapsed .card-head .btn { opacity: .55; }
+.card.collapsed .card-head .btn:hover { opacity: 1; }

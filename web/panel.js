@@ -262,6 +262,68 @@ function reorder(from, to) {
 
 /* ── 详情：和原来那张卡一致 ── */
 
+/**
+ * 把详情里的卡片做成可折叠。
+ *
+ * 第一张（概览：登录状态 / 立即签到）保持原样——它是入口，不该藏。
+ * 其余每张加一个橙色三角箭头，默认折叠；点标题或箭头展开。
+ * 展开状态记在 sessionStorage，切服务回来还是原样。
+ */
+function makeCollapsible(box) {
+  const cards = [...box.querySelectorAll('section.card')]
+  cards.forEach((card, idx) => {
+    if (idx === 0) return  // 概览卡不动
+    const head = card.querySelector('.card-head')
+    if (!head || head.dataset.collapsible === '1') return
+    head.dataset.collapsible = '1'
+
+    // 标题文本：优先 h2，其次 card-head 里的第一个文本节点
+    const h2 = head.querySelector('h2')
+    const title = h2 ? h2.textContent.trim() : ''
+
+    // 把 head 变成可点的按钮式结构，前面插三角
+    const chev = document.createElement('span')
+    chev.className = 'chev'
+    chev.textContent = '▸'
+    chev.setAttribute('aria-hidden', 'true')
+    head.insertBefore(chev, head.firstChild)
+    head.classList.add('collapsible-head')
+    head.setAttribute('role', 'button')
+    head.setAttribute('tabindex', '0')
+    if (title) head.setAttribute('aria-label', `${title}（点击展开）`)
+
+    // 除 head 之外的内容包起来，方便整体隐藏
+    const body = document.createElement('div')
+    body.className = 'card-body'
+    while (head.nextSibling) body.appendChild(head.nextSibling)
+    card.appendChild(body)
+
+    // 恢复上次的展开状态（按 服务id + 卡片标题 做 key）
+    const key = `dsh-checkin-all:card:${CURRENT}:${title}`
+    let open = false
+    try { open = sessionStorage.getItem(key) === '1' } catch { /* 忽略 */ }
+
+    const apply = (next) => {
+      card.classList.toggle('collapsed', !next)
+      chev.textContent = next ? '▾' : '▸'
+      head.setAttribute('aria-expanded', String(next))
+      head.setAttribute('aria-label', `${title}（点击${next ? '收起' : '展开'}）`)
+      try { sessionStorage.setItem(key, next ? '1' : '0') } catch { /* 忽略 */ }
+    }
+    apply(open)
+
+    const toggle = () => apply(card.classList.contains('collapsed'))
+    head.addEventListener('click', (e) => {
+      // head 里的按钮（刷新 / 配置凭据等）不触发折叠
+      if (e.target.closest('button')) return
+      toggle()
+    })
+    head.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() }
+    })
+  })
+}
+
 function renderDetail() {
   const p = providerOf(CURRENT)
   const box = $('#detail')
@@ -487,6 +549,9 @@ function renderDetail() {
       <div class="card-head"><h2>最近 14 天</h2></div>
       <div id="history" class="history"><span class="muted">读取中…</span></div>
     </section>`
+
+  // 除第一张概览卡外，其余卡片都做成可折叠（默认折叠）
+  makeCollapsible(box)
 
   $('#btn-checkin').onclick = () => checkin(p.id)
   $('#btn-refresh').onclick = () => loadPanel(p.id, { force: true })
