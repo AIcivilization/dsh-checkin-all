@@ -1,28 +1,89 @@
 # dsh-checkin-all
 
-每天自动给 **MiniMax Code**、**WPS 灵犀**、**百度 DuMate（搭子）**、**AStudio（星火）**、**Qoder**、**Trae** 和 **豆包** 签到领积分。装进 [DeepSeek Harness](https://github.com/deepseek-ai/dsh)（dsh）之后，
-它会用本机 App 已经存好的登录凭据，每天到点调一次官方签到接口，签完记账，面板挂在对话页右侧栏，
-**顶部按服务切换卡片**。
+每天自动给 **MiniMax Code**、**WPS 灵犀**、**百度 DuMate（搭子）**、**AStudio（星火）**、**Qoder**、**Trae**、**豆包**、**华为 CodeArts**、**腾讯 WorkBuddy** 签到领积分。装进 [DeepSeek Harness](https://github.com/deepseek-ai/dsh)（dsh）之后，它会用本机 App 已经存好的登录凭据，每天到点调一次官方签到接口，签完记账，面板挂在对话页右侧栏。
 
-> 你不用记着签，也不用把账号密码交给任何东西——凭据本来就是 App 自己存的
-> （MiniMax Code 在 `~/.minimax/auth/`，WPS 灵犀和 DuMate 在各自的 Cookies 里）。
+> 你不用记着签，也不用把账号密码交给任何东西——凭据本来就是 App 自己存的（MiniMax Code 在 `~/.minimax/auth/`，灵犀和搭子在各自的 Cookies 里）。
 
-> **为什么要自动签**：灵犀的连续签到断一天就归零（回退到第 1 天）。手动记着签太容易忘，
-> 这个插件就是替你记住的那一下。
+> **为什么要自动签**：灵犀的连续签到断一天就归零（回退到第 1 天）。手动记着签太容易忘，这个插件就是替你记住的那一下。
+
+## 三个重点能力
+
+### 1. 内置 9 个服务，开箱即用
+
+装上就能签，凭据自动从本机 App 里读，不用手动配。详见下方「支持的服务」。
+
+### 2. 没有的服务？自己 DIY 一个
+
+内置之外还有一堆能签到的站点。面板底部有 **「＋ 添加签到服务」**，两条路：
+
+**让 DSH 的 AI 帮你做**（推荐）
+
+```
+点「＋ 添加签到服务」→ 复制提示词 → 粘到 DSH 对话
+→ 告诉 AI 是哪个 App / 网站、本机哪里登录着
+→ AI 帮你查接口，给一段 JSON
+→ 回来「粘贴定义」贴进去 → 立刻多一张卡片
+```
+
+**自己写定义**（知道接口长什么样的话）
+
+一份 JSON 描述接口就行，不用改代码：
+
+```json
+{
+  "id": "kuaKe",
+  "name": "夸克网盘",
+  "short": "夸克",
+  "color": "#0ea5e9",
+  "unit": "积分",
+  "checkin": { "method": "POST", "url": "https://example.com/api/checkin",
+               "headers": { "cookie": "{{cookie}}" } },
+  "status":  { "url": "https://example.com/api/status",
+               "claimedPath": "data.checked_in_today",
+               "pointsPath": "data.today_points" },
+  "successPath": "code",
+  "successValue": 0
+}
+```
+
+导入后它和内置服务**完全一样**：参与自动签到、有卡片、能记账、支持多账号。
+
+> 限制：只覆盖「一个 HTTP 请求 + 一个状态查询」这种形态。需要签名（如华为云 HMAC）或多步流程的服务，还是得写代码。
+
+### 3. 每个服务支持多账号
+
+同一个服务可以配多个账号，签到时会逐个签、分别汇报。
+
+```
+面板「账号」卡片 → 填凭据 → 添加账号（可加备注名区分主号 / 小号）
+```
+
+命令行也行：
+
+```bash
+node bin/dsh-checkin-all.js set lingxi "<sid>" --name 主号
+node bin/dsh-checkin-all.js set lingxi "<sid>" --name 小号
+```
+
+汇总规则：任一账号签上就算成功，积分累加，连续天数取最大值；单个账号失败不影响其他账号，消息里会点名是哪个失败。
+
+支持多账号的：灵犀、DuMate、AStudio、Qoder、Trae、豆包、CodeArts、WorkBuddy，以及**所有 DIY 的自定义服务**。
+（MiniMax 例外：凭据是 App 的 OAuth 文件且 refresh token 一次性，不适合多账号。）
 
 ## 支持的服务
 
-| 服务 | 凭据来源 | 签到单位 | 「今天」按哪算 |
-| --- | --- | --- | --- |
-| MiniMax Code | `~/.minimax/auth/`（OAuth） | 分 | **北京时间** |
-| WPS 灵犀 | 灵犀自己的 Cookies（`wps_sid`） | 智点 | **北京时间** |
-| 百度 DuMate | `qianfan-desktop-app/auth.json`（加密 cookie） | 积分 | **北京时间** |
-| AStudio | `~/.acode/acode/userdata/astron-session.json` | 积分 | **北京时间** |
-| Qoder | 本机 Qoder App 登录（自动读），或面板填 PAT | 积分 | **北京时间** |
-| Trae | 本机 Trae App/CLI 登录（自动读） | 积分 | **北京时间** |
-| 豆包 | 登录 Cookie（面板「配置 Cookie」，或从本机豆包/浏览器读） | 额度 | **北京时间** |
-| 华为 CodeArts | 浏览器登录（点一下授权，自动拿 AK/SK；也可手填） | 积分 | **北京时间** |
-| 腾讯 WorkBuddy | 浏览器登录（点一下授权；也可手贴 token，多账号） | 积分 | **北京时间** |
+| 服务 | 凭据来源 | 签到单位 | 多账号 | 「今天」按哪算 |
+| --- | --- | --- | :---: | --- |
+| MiniMax Code | `~/.minimax/auth/`（OAuth） | 分 | — | **北京时间** |
+| WPS 灵犀 | 灵犀自己的 Cookies（`wps_sid`） | 智点 | ✅ | **北京时间** |
+| 百度 DuMate | `qianfan-desktop-app/auth.json`（加密 cookie） | 积分 | ✅ | **北京时间** |
+| AStudio | `~/.acode/acode/userdata/astron-session.json` | 积分 | ✅ | **北京时间** |
+| Qoder | 本机 Qoder App 登录（自动读），或面板填 PAT | 积分 | ✅ | **北京时间** |
+| Trae | 本机 Trae App/CLI 登录（自动读） | 积分 | ✅ | **北京时间** |
+| 豆包 | 登录 Cookie（面板「配置 Cookie」，或从本机豆包/浏览器读） | 额度 | ✅ | **北京时间** |
+| 华为 CodeArts | 浏览器登录（点一下授权，自动拿 AK/SK；也可手填） | 积分 | ✅ | **北京时间** |
+| 腾讯 WorkBuddy | 浏览器登录（点一下授权；也可手贴 token） | 积分 | ✅ | **北京时间** |
+| **自定义服务** | 面板「添加签到服务」，AI 生成或自己贴 JSON | 自定义 | ✅ | **北京时间** |
 
 **全部服务一律按北京时间算「今天」和签到窗口，不跟随本机时区。**
 
@@ -32,14 +93,18 @@
 ## 它做什么
 
 - **每个服务每天到点自动签到**：默认 09:00，可给每个服务单独设时间
-- **顶部索引**：每个服务一张卡，显示登录状态、今天签没签、连续天数，点一下切到详情
+- **多账号**：同一个服务能配多个账号，逐个签、分别汇报，一个失败不影响其他
+- **自定义服务**：面板「＋ 添加签到服务」，让 AI 查接口或自己贴 JSON，导入即成卡片
+- **紧凑卡片**：每张卡两行——彩色服务名 + 连续天数 / 登录状态 + 今日签到
+- **折叠**：未登录、无任务、还没到轮次的自动收起来，点一下展开
+- **拖动排序**：拖卡片换位置，顺序记在本机
 - **补签**：电脑睡过了、DSH 半夜才启动，醒来照样补上（可关）
 - **不重复签**：今天已经签过（哪怕你是在 App 里点的）就不动
+- **失败退避**：连续失败会拉长重试间隔（1/2/4/8/16/32 分钟），失败 6 次当天停手，不会白刷接口
 - **自动续期**：access token 快过期时用 refresh token 换新的并**写回 App 的位置**，App 那边不受影响
 - **记账**：每个服务分开记连续天数、累计积分、最近 14 天每天的结果
-- **面板**：对话页右侧栏，顶部索引卡 + 每个服务的一周签到表 + 设置；DSH 设置里也有一块
 - **对话里能用**：说「帮我签到」「MiniMax 积分还有多少」「以后每天 8 点签」就行
-- **登录兜底**：凭据失效时给一个设备码，在浏览器里确认一次（和 App 里登录是同一条 OAuth 链路）
+- **登录兜底**：凭据失效时给一个设备码或浏览器授权（CodeArts / WorkBuddy），点一下就好
 
 ## 安装
 
@@ -582,6 +647,22 @@ ssh vps 'bash /opt/dsh-checkin-all/scripts/deploy-vps.sh /opt/dsh-checkin-all'
 ```bash
 node --test "test/*.test.js"
 ```
+
+## 标签
+
+方便搜索和归类：
+
+**功能**
+`签到` `自动签到` `每日签到` `连续签到` `打卡` `领取` `积分` `智点` `额度`
+`多账号` `多账户` `账号池` `自定义签到` `自定义服务` `DIY` `扩展`
+
+**服务**
+`MiniMax Code` `WPS 灵犀` `百度 DuMate` `搭子` `AStudio` `星火` `Qoder` `Trae` `豆包`
+`华为 CodeArts` `华为云` `腾讯 WorkBuddy` `CodeBuddy`
+
+**技术**
+`DeepSeek Harness` `dsh` `dsh-plugin` `cordis` `插件` `面板` `dashboard`
+`北京时区` `beijing-time` `零配置` `本机凭据` `OAuth`
 
 ## License
 
