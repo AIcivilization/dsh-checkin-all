@@ -765,3 +765,27 @@ test('详情折叠：head 里的按钮不会误触发折叠', async () => {
   const src = await readFile('/Users/wf/dsh/dsh-checkin-all/web/panel.js', 'utf8')
   assert.match(src, /e\.target\.closest\('button'\)/, '点刷新等按钮时不该折叠卡片')
 })
+
+test('顶部卡片布局：.index 是纵向流，卡片网格交给 .igroup', async () => {
+  const css = await readFile('/Users/wf/dsh/dsh-checkin-all/web/panel.css', 'utf8')
+  const idx = css.match(/\.index \{[^}]+\}/)
+  assert.ok(idx, '找不到 .index 规则')
+  // 踩过的坑：.index 用 grid 时，里面的 igroup / 折叠条 / 添加按钮
+  // 会被各塞进一个窄格子，表现成「全挤在左边一列」
+  assert.match(idx[0], /flex-direction:\s*column/, '.index 必须是纵向流')
+  assert.ok(!/display:\s*grid/.test(idx[0]), '.index 不能是 grid（会把整块压进一列）')
+
+  const group = css.match(/\.igroup \{[^}]+\}/)
+  assert.ok(group, '找不到 .igroup 规则')
+  assert.match(group[0], /display:\s*grid/, '.igroup 才是卡片网格')
+  assert.match(group[0], /minmax\(148px/, '卡片最小宽度 148px')
+})
+
+test('顶部卡片布局：分组条和添加按钮占满整行', async () => {
+  const css = await readFile('/Users/wf/dsh/dsh-checkin-all/web/panel.css', 'utf8')
+  for (const cls of ['igroup-toggle', 'igroup-add']) {
+    const rule = css.match(new RegExp(`\\.${cls} \\{[^}]+\\}`))
+    assert.ok(rule, `找不到 .${cls}`)
+    assert.match(rule[0], /width:\s*100%/, `.${cls} 要占满整行`)
+  }
+})

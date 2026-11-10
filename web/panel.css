@@ -198,10 +198,12 @@ input[type="time"] {
 body.cards-only .head-title { cursor: default; }
 body.cards-only .head-title:hover { opacity: 1; }
 
+/* 索引区是纵向流：里面装的是「卡片组 / 折叠条 / 添加按钮」这几个块，
+   卡片网格交给 .igroup 自己排。这里要是也用 grid，整块会被塞进一个窄格子里。 */
 .index {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
-  gap: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
 }
 .index-loading { font-size: 12px; padding: 10px 2px; }
 
