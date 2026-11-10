@@ -1,6 +1,22 @@
 # dsh-checkin-all
 
-每天自动给 **MiniMax Code**、**WPS 灵犀**、**百度 DuMate（搭子）**、**AStudio（星火）**、**Qoder**、**Trae**、**豆包**、**华为 CodeArts**、**腾讯 WorkBuddy** 签到领积分。装进 [DeepSeek Harness](https://github.com/deepseek-ai/dsh)（dsh）之后，它会用本机 App 已经存好的登录凭据，每天到点调一次官方签到接口，签完记账，面板挂在对话页右侧栏。
+[![npm](https://img.shields.io/npm/v/dsh-checkin-all?style=flat-square&logo=npm&color=cb3837)](https://www.npmjs.com/package/dsh-checkin-all)
+[![npm downloads](https://img.shields.io/npm/dm/dsh-checkin-all?style=flat-square&color=blue)](https://www.npmjs.com/package/dsh-checkin-all)
+[![license](https://img.shields.io/npm/l/dsh-checkin-all?style=flat-square&color=green)](./LICENSE)
+[![node](https://img.shields.io/node/v/dsh-checkin-all?style=flat-square&logo=node.js)](https://nodejs.org)
+[![dsh](https://img.shields.io/badge/dsh-%E2%89%A50.2.0-4B32C3?style=flat-square)](https://github.com/deepseek-ai/dsh)
+[![tests](https://img.shields.io/badge/tests-124%20passing-brightgreen?style=flat-square)](./test)
+[![services](https://img.shields.io/badge/%E5%86%85%E7%BD%AE%E6%9C%8D%E5%8A%A1-9-2f6bff?style=flat-square)](#支持的服务)
+
+**签到 / 自动签到 / 每日签到 / 打卡 / 领积分 / 多账号 / DIY 自定义签到 / DeepSeek Harness 插件**
+
+每天自动给 **MiniMax Code**、**WPS 灵犀**、**百度 DuMate（搭子）**、**AStudio（星火）**、**Qoder**、**Trae**、**豆包**、**华为 CodeArts**、**腾讯 WorkBuddy** 签到领积分。
+
+**没在列表里的服务，可以自己 DIY 签到**——面板点「＋ 添加签到服务」，让 DSH 的 AI 帮你查接口，或直接贴一份 JSON，导入就变成新卡片。
+
+**每个服务都支持多账号**：同一个服务配多个号，逐个签、分别记账，一个失败不影响其他。
+
+装进 [DeepSeek Harness](https://github.com/deepseek-ai/dsh)（dsh）之后，它会用本机 App 已经存好的登录凭据，每天到点调一次官方签到接口，签完记账，面板挂在对话页右侧栏。
 
 > 你不用记着签，也不用把账号密码交给任何东西——凭据本来就是 App 自己存的（MiniMax Code 在 `~/.minimax/auth/`，灵犀和搭子在各自的 Cookies 里）。
 
