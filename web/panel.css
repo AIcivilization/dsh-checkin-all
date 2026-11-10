@@ -197,26 +197,27 @@ input[type="time"] {
 
 .index {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 6px;
 }
 .index-loading { font-size: 12px; padding: 10px 2px; }
 
+/* 索引卡片：紧凑两行 —— 名字 + 连续天数 / 登录 + 签到 */
 .icard {
   appearance: none;
   font-family: inherit;
   text-align: left;
   cursor: pointer;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 9px;
   background: var(--panel);
-  padding: 10px 11px 9px;
+  padding: 7px 9px 6px;
   color: var(--text);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   position: relative;
-  transition: border-color .15s, background .15s, box-shadow .15s, transform .12s;
+  transition: border-color .15s, background .15s, box-shadow .15s;
 }
 .icard:hover { background: var(--panel-2); }
 .icard.on {
@@ -224,41 +225,69 @@ input[type="time"] {
   box-shadow: 0 0 0 1px var(--brand, var(--accent)) inset;
   background: color-mix(in srgb, var(--brand, var(--accent)) 8%, var(--panel));
 }
-.icard.on::after {
-  content: '';
-  position: absolute;
-  left: 11px; right: 11px; bottom: -1px;
-  height: 2px;
-  border-radius: 2px;
-  background: var(--brand, var(--accent));
+
+/* 第一行：彩色名字 + 连续天数 */
+.ihead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+}
+.iname {
+  font-size: 12.5px;
+  font-weight: 650;
+  letter-spacing: -.01em;
+  color: var(--brand, var(--accent));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.istreak {
+  font-size: 10.5px;
+  color: var(--t3);
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
-.icard-top {
+/* 第二行：登录状态 + 今日签到，并排 */
+.istat {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 4px;
+  gap: 8px;
+  min-width: 0;
+  font-size: 10.5px;
+  color: var(--t2);
+  line-height: 14px;
 }
-.iavatar {
-  width: 26px; height: 26px; border-radius: 8px;
-  display: grid; place-items: center;
-  font-size: 13px; font-weight: 700; color: #fff;
-  background: var(--brand, var(--accent));
-  flex: none;
+.istat-item {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  flex: 1 1 0;
 }
-.cdot {
-  width: 7px; height: 7px; border-radius: 50%; flex: none;
+.istat-item .itxt {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.cdot.ok { background: var(--ok); }
-.cdot.warn { background: var(--warn); }
-.cdot.bad { background: var(--bad); }
 
-.iname { font-size: 13px; font-weight: 600; letter-spacing: -.01em; }
-.iline {
-  font-size: 11.5px; color: var(--t2);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+/* 状态符号：✓ 正常（绿）/ ○ 待办（橙）/ ✗ 异常（红）/ – 不适用（灰）
+   用字形 + 颜色双重区分，不靠纯色圆点：色盲也能分辨，含义也更直接。 */
+.cmark {
+  width: 12px; height: 12px; flex: none;
+  display: grid; place-items: center;
+  font-size: 9px; font-weight: 700; line-height: 1;
+  border-radius: 50%;
+  font-variant-numeric: tabular-nums;
 }
-.imeta { font-size: 11px; color: var(--t3); min-height: 15px; }
+.cmark.ok { color: var(--ok); background: var(--ok-bg, rgba(15,157,88,.12)); }
+.cmark.warn { color: var(--warn); background: var(--warn-bg, rgba(217,122,6,.12)); }
+.cmark.bad { color: var(--bad); background: var(--bad-bg, rgba(201,64,64,.12)); }
+.cmark.idle { color: var(--muted, #999); background: rgba(127,127,127,.12); }
 
 /* 详情区 */
 .detail { display: flex; flex-direction: column; gap: 12px; }

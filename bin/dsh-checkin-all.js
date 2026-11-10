@@ -3,7 +3,7 @@
 //
 //   dsh-checkin-all status              所有服务：登录状态 + 本周签到表 + 连续天数
 //   dsh-checkin-all checkin [服务]      立刻签到（--dry 只看不领）；不指定服务就全签
-//   dsh-checkin-all login               设备码登录 MiniMax Code
+//   dsh-checkin-all login [服务]        登录（minimax 设备码 / codearts、buddy 浏览器授权）
 //   dsh-checkin-all time 08:30          改自动签到时间
 //   dsh-checkin-all on | off            开 / 关自动签到
 //   dsh-checkin-all cron                给系统 crontab 用的静默签到
@@ -15,7 +15,7 @@
 
 import { Runner } from '../lib/runner.js'
 import { loadConfig, loadState, saveConfig, providerConfig } from '../lib/store.js'
-import { setManual, getManual, loadSecrets } from '../lib/checkin-secrets.js'
+import { setManual, getManual, loadSecrets, addAccount, listAccounts } from '../lib/checkin-secrets.js'
 
 const argv = process.argv.slice(2)
 const command = (argv[0] || 'status').toLowerCase()
@@ -107,13 +107,25 @@ async function main() {
   }
 
   if (command === 'login' || command === '登录') {
-    const info = await runner.loginStart('minimax')
+    // 可选指定服务：login codearts / login minimax（默认 minimax）
+    const target = rest[0] || 'minimax'
+    // WorkBuddy 可选指定产品线：login buddy intl
+    const regionArg = rest[1]
+    const loginOpts = (target === 'buddy' && regionArg) ? { region: regionArg } : {}
+    const info = await runner.loginStart(target, loginOpts)
+    const browserFlow = !info.userCode
     console.log(`在浏览器打开：${info.verificationUri}`)
-    console.log(`设备码：${info.userCode}`)
-    console.log(`（或直接打开 ${info.verificationUriComplete}）`)
-    console.log(`等待确认…（${Math.round(info.expiresInSec / 60)} 分钟内有效）`)
-    const result = await runner.loginWait('minimax', { timeoutMs: info.expiresInSec * 1000 })
-    console.log(`登录成功，凭据已写回 MiniMax Code（${result.expiresAt} 过期）`)
+    if (!browserFlow) console.log(`设备码：${info.userCode}`)
+    if (info.verificationUriComplete && info.verificationUriComplete !== info.verificationUri) {
+      console.log(`（或直接打开 ${info.verificationUriComplete}）`)
+    }
+    console.log(browserFlow
+      ? `等待浏览器授权…（${Math.round(info.expiresInSec / 60)} 分钟内有效）`
+      : `等待确认…（${Math.round(info.expiresInSec / 60)} 分钟内有效）`)
+    const result = await runner.loginWait(target, { ...loginOpts, timeoutMs: info.expiresInSec * 1000 })
+    if (target === 'codearts') console.log(`登录成功，华为云凭据已保存（${result.expiresAt} 过期）`)
+    else if (target === 'buddy') console.log(`登录成功，${result.product || 'WorkBuddy'} 凭据已保存`)
+    else console.log(`登录成功，凭据已写回 MiniMax Code（${result.expiresAt} 过期）`)
     return
   }
 
@@ -150,45 +162,68 @@ async function main() {
   }
 
   if (command === 'set' || command === 'cred' || command === '手动配置') {
-    const provider = rest[0]
-    const value = rest.slice(1).join(' ').trim()
+    // 支持 --name 备注名（多账号时区分）
+    // 注意：外层 rest 已经滤掉了 - 开头的参数（连同标记），
+    // 所以这里必须解析**原始 argv**，否则 --name 的值会被当成凭据的一部分。
+    let name = ''
+    let regionArg = 'cn'
+    const args = []
+    for (let i = 1; i < argv.length; i += 1) {
+      const a = argv[i]
+      if (a === '--name' || a === '-n') { name = String(argv[i + 1] || ''); i += 1 }
+      else if (a === '--region') { regionArg = String(argv[i + 1] || 'cn'); i += 1 }
+      else if (a.startsWith('-')) { /* 其它 flag 忽略 */ }
+      else args.push(a)
+    }
+    const provider = args[0]
+    const value = args.slice(1).join(' ').trim()
     if (!provider || !value) {
-      console.error('用法：dsh-checkin-all set <服务> <值>')
-      console.error('  lingxi  → wps_sid 的值')
-      console.error('  dumate  → 完整 Cookie 串（含 bce-user-info）')
-      console.error('  astudio → "accountId,token,ssoSessionId"（逗号分隔）')
-      console.error('  trae    → Cloud-IDE-JWT token')
+      console.error('用法：dsh-checkin-all set <服务> <值> [--name 备注名]')
+      console.error('  lingxi   → wps_sid 的值')
+      console.error('  dumate   → 完整 Cookie 串（含 bce-user-info）')
+      console.error('  astudio  → "accountId,token,ssoSessionId"（逗号分隔）')
+      console.error('  trae     → Cloud-IDE-JWT token')
+      console.error('  codearts → "access_key_id,secret_access_key[,security_token]"')
+      console.error('  buddy    → access_token（可用 --region cn|intl 指定产品线）')
       process.exitCode = 2
       return
     }
+
+    // 每个服务的凭据字段
+    let entry
     if (provider === 'astudio') {
-      const [accountId, token, ssoSessionId] = value.split(',').map(s => s.trim())
+      const [accountId, token, ssoSessionId] = value.split(',').map(x => x.trim())
       if (!accountId || !token) {
         console.error('AStudio 需要 accountId 和 token（用逗号分隔）')
         process.exitCode = 2
         return
       }
-      await setManual('astudio', { accountId, token, ...(ssoSessionId ? { ssoSessionId } : {}) })
-      console.log('已保存 AStudio 手动凭据')
+      entry = { accountId, token, ...(ssoSessionId ? { ssoSessionId } : {}) }
+    } else if (provider === 'lingxi') {
+      entry = { wps_sid: value }
+    } else if (provider === 'dumate') {
+      entry = { cookie: value }
+    } else if (provider === 'trae') {
+      entry = { token: value }
+    } else if (provider === 'codearts') {
+      const [access_key_id, secret_access_key, security_token] = value.split(',').map(x => x.trim())
+      if (!access_key_id || !secret_access_key) {
+        console.error('CodeArts 需要 access_key_id 和 secret_access_key（用逗号分隔）')
+        process.exitCode = 2
+        return
+      }
+      entry = { access_key_id, secret_access_key, ...(security_token ? { security_token } : {}) }
+    } else if (provider === 'buddy') {
+      entry = { access_token: value, region: regionArg === 'intl' ? 'intl' : 'cn' }
+    } else {
+      console.error(`不认识的服务：${provider}（lingxi / dumate / astudio / trae / codearts / buddy）`)
+      process.exitCode = 2
       return
     }
-    if (provider === 'lingxi') {
-      await setManual('lingxi', { wps_sid: value })
-      console.log('已保存灵犀 wps_sid')
-      return
-    }
-    if (provider === 'dumate') {
-      await setManual('dumate', { cookie: value })
-      console.log('已保存搭子 Cookie')
-      return
-    }
-    if (provider === 'trae') {
-      await setManual('trae', { token: value })
-      console.log('已保存 Trae token')
-      return
-    }
-    console.error(`不认识的服务：${provider}（只能是 lingxi / dumate / astudio / trae）`)
-    process.exitCode = 2
+
+    const record = await addAccount(provider, { ...entry, ...(name ? { name } : {}) })
+    const total = (await listAccounts(provider)).length
+    console.log(`已添加 ${provider} 账号 #${record.id}${name ? `（${name}）` : ''}，现在共 ${total} 个账号`)
     return
   }
 
@@ -207,8 +242,8 @@ async function main() {
   console.log(`用法：
   dsh-checkin-all status              所有服务：登录状态 + 本周签到表
   dsh-checkin-all checkin [服务]      立刻签到（--dry 只看不领）
-  dsh-checkin-all login               设备码登录 MiniMax Code
-  dsh-checkin-all set <服务> <值>     手动配置凭据（lingxi/dumate/astudio/trae）
+  dsh-checkin-all login [服务]        登录（minimax 设备码 / codearts、buddy 浏览器授权）
+  dsh-checkin-all set <服务> <值>     手动配置凭据（lingxi/dumate/astudio/trae/codearts/buddy）
   dsh-checkin-all unset <服务>        删除某个服务的手动凭据
   dsh-checkin-all time 08:30          改自动签到时间
   dsh-checkin-all on | off            开 / 关自动签到
@@ -236,6 +271,24 @@ main().catch((error) => {
   }
   if (error.code === 'DOUBAO_NOT_CONFIGURED') {
     console.error('豆包没配置：在面板里添加 Cookie（手动粘贴或从浏览器读）')
+  }
+  if (error.code === 'CODEARTS_NOT_CONFIGURED') {
+    console.error('CodeArts 没配置：跑一次 dsh-checkin-all login codearts，或点面板上的「登录」按钮')
+  }
+  if (error.code === 'CODEARTS_LOGIN_TIMEOUT') {
+    console.error('CodeArts 登录超时：再跑一次 dsh-checkin-all login codearts（授权要在 3 分钟内完成）')
+  }
+  if (error.code === 'CODEARTS_HTTP_ERROR' || error.code === 'CODEARTS_API_ERROR') {
+    console.error('CodeArts 调用被拒：检查 AK/SK 是否正确、账号是不是积分计费')
+  }
+  if (error.code === 'BUDDY_NOT_CONFIGURED') {
+    console.error('WorkBuddy 没配置：跑一次 dsh-checkin-all login buddy，或点面板上的「登录」按钮')
+  }
+  if (error.code === 'BUDDY_LOGIN_TIMEOUT') {
+    console.error('WorkBuddy 登录超时：再跑一次 dsh-checkin-all login buddy（授权要在 5 分钟内完成）')
+  }
+  if (error.code === 'BUDDY_AUTH') {
+    console.error('WorkBuddy 登录失效：重新从 copilot.tencent.com 复制 access_token')
   }
   process.exitCode = 1
 })

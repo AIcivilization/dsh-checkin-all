@@ -69,6 +69,42 @@ test('灵犀 status=claimable 时今天标成可领', () => {
   assert.match(describeLingxiPanel(panel), /可以领/)
 })
 
+test('灵犀 task.status=incomplete 但今天那格 available 时，必须判为可领', () => {
+  // 实测灵犀就是这么返回的：task.status 是 incomplete，不是 claimable。
+  // 旧代码只认 'claimable'，于是永远不签——灵犀断签就是这么来的。
+  const task = {
+    ...lingxiTask,
+    status: 'incomplete',
+    extra: {
+      ...lingxiTask.extra,
+      today_day: 2,
+      check_in_days: lingxiTask.extra.check_in_days.map(d => ({
+        ...d,
+        status: d.day === 1 ? 'claimed' : d.day === 2 ? 'available' : 'locked',
+      })),
+    },
+  }
+  const panel = normalizeLingxiPanel(task, 7100)
+  assert.equal(panel.claimable, true, 'incomplete + 今天 available 应该是可领')
+  assert.equal(panel.today.dayNo, 2)
+  assert.equal(panel.today.status, 2)
+  assert.match(describeLingxiPanel(panel), /可以领/)
+})
+
+test('灵犀今天那格已 claimed 时不可领（不论 task.status 说什么）', () => {
+  const task = {
+    ...lingxiTask,
+    status: 'claimable',
+    extra: {
+      ...lingxiTask.extra,
+      check_in_days: lingxiTask.extra.check_in_days.map(d => ({ ...d, status: d.day === 1 ? 'claimed' : d.status })),
+    },
+  }
+  const panel = normalizeLingxiPanel(task, 7000)
+  assert.equal(panel.claimable, false, '已经 claimed 的不能再领')
+  assert.equal(panel.today.status, 3)
+})
+
 test('灵犀已签的说法', () => {
   const panel = normalizeLingxiPanel(lingxiTask, 7000)
   assert.match(describeLingxiPanel(panel), /已经签过了/)
@@ -83,9 +119,9 @@ test('灵犀从任务列表里挑出签到任务', () => {
 
 test('注册表里有七个服务，元信息齐全', () => {
   const providers = createProviders({ log: () => {} })
-  assert.deepEqual(providers.ids(), ['minimax', 'lingxi', 'dumate', 'astudio', 'qoder', 'trae', 'doubao'])
+  assert.deepEqual(providers.ids(), ['minimax', 'lingxi', 'dumate', 'astudio', 'qoder', 'trae', 'doubao', 'codearts', 'buddy'])
   const meta = providers.meta()
-  assert.equal(meta.length, 7)
+  assert.equal(meta.length, 9)
   const lingxi = meta.find(m => m.id === 'lingxi')
   assert.equal(lingxi.name, 'WPS 灵犀')
   assert.equal(lingxi.timeZoneMode, 'fixed')
@@ -114,6 +150,15 @@ test('注册表里有七个服务，元信息齐全', () => {
   assert.equal(doubao.name, '豆包')
   assert.equal(doubao.timeZoneMode, 'fixed')
   assert.equal(doubao.unit, '额度')
+  const codearts = meta.find(m => m.id === 'codearts')
+  assert.equal(codearts.name, '华为 CodeArts')
+  assert.equal(codearts.timeZoneMode, 'fixed')
+  assert.equal(codearts.unit, '积分')
+  const buddy = meta.find(m => m.id === 'buddy')
+  assert.equal(buddy.name, '腾讯 WorkBuddy')
+  assert.equal(buddy.short, 'WorkBuddy')
+  assert.equal(buddy.timeZoneMode, 'fixed')
+  assert.equal(buddy.unit, '积分')
 })
 
 test('每个服务单独设置：没写就跟全局', () => {
@@ -456,7 +501,7 @@ test('AStudio 凭据目录：Windows 用 USERPROFILE/.acode，macOS 用 ~/.acode
 
 // ── Qoder / Trae / 豆包（从 dsh-model 移植的签到服务）──
 
-import { claimableCampaign, QODER_REGIONS } from '../lib/providers/qoder.js'
+import { claimableCampaign, QODER_REGIONS, qoderRefreshedToday, todaysBenefit, currentCampaignStart } from '../lib/providers/qoder.js'
 import { pickTraeCredential, tokenDaysLeft, decryptStorageValue, tokenAccountId } from '../lib/providers/trae.js'
 import { deviceIdsFor, normalizeCookie, doubaoStatus } from '../lib/providers/doubao.js'
 
@@ -465,15 +510,51 @@ test('Qoder 区域配置完整', () => {
   assert.equal(QODER_REGIONS.intl.openApi, 'https://openapi.qoder.sh')
 })
 
+test('Qoder 活动每天 10:00（UTC+8）才换新一轮', () => {
+  // UTC 01:00 = UTC+8 09:00 -> 还没刷新，看到的是昨天那轮
+  assert.equal(qoderRefreshedToday(Date.parse('2026-11-05T01:00:00Z')), false)
+  // UTC 01:59 = UTC+8 09:59 -> 仍未刷新
+  assert.equal(qoderRefreshedToday(Date.parse('2026-11-05T01:59:00Z')), false)
+  // UTC 02:00 = UTC+8 10:00 -> 刷新了
+  assert.equal(qoderRefreshedToday(Date.parse('2026-11-05T02:00:00Z')), true)
+  // UTC 09:00 = UTC+8 17:00 -> 刷新了
+  assert.equal(qoderRefreshedToday(Date.parse('2026-11-05T09:00:00Z')), true)
+})
+
 test('Qoder 从活动列表挑出当天能领的 CLAIM_BENEFIT', () => {
   const now = Date.now()
-  const campaign = { actionType: 'CLAIM_BENEFIT', campaignId: 'c1', startAt: now - 1000, endAt: now + 1000, claimStatus: 'NONE' }
+  const campaign = { actionType: 'CLAIM_BENEFIT', campaignId: 'c1', startAt: now - 1000, endAt: now + 1000, claimStatus: 'CLAIMABLE' }
   assert.equal(claimableCampaign({ campaigns: [campaign] }, now), campaign)
   // 已过期的活动不选
-  const expired = { actionType: 'CLAIM_BENEFIT', campaignId: 'c2', startAt: now - 2000, endAt: now - 1000 }
+  const expired = { actionType: 'CLAIM_BENEFIT', campaignId: 'c2', startAt: now - 2000, endAt: now - 1000, claimStatus: 'CLAIMABLE' }
   assert.equal(claimableCampaign({ campaigns: [expired] }, now), undefined)
   // 非 CLAIM_BENEFIT 不选
   assert.equal(claimableCampaign({ campaigns: [{ actionType: 'OTHER', startAt: now - 1, endAt: now + 1 }] }, now), undefined)
+})
+
+test('Qoder 已领取（CLAIMED）的活动不能再当「可领」返回', () => {
+  // 这是实际踩到的坑：以前只看时间窗口，不看 claimStatus，
+  // 于是已领的活动也被返回，每次签到都白打一次 claim 接口。
+  const now = Date.now()
+  const claimed = {
+    actionType: 'CLAIM_BENEFIT', campaignId: 'c1', claimStatus: 'CLAIMED',
+    startAt: now - 1000, endAt: now + 1000, benefit: { amount: 100 },
+  }
+  assert.equal(claimableCampaign({ campaigns: [claimed] }, now), undefined, 'CLAIMED 不该返回')
+  // 但要能通过 todaysBenefit 认出来「今天这一轮存在且已领」
+  assert.equal(todaysBenefit({ campaigns: [claimed] }, now), claimed)
+})
+
+test('Qoder 当前轮次起点：UTC+8 10:00 换轮', () => {
+  const fmt = (t) => new Date(t + 8 * 3600e3).toISOString().replace('Z', '').slice(0, 16)
+  // 09:59 属于前一天 10:00 开始的轮次
+  assert.equal(fmt(currentCampaignStart(Date.parse('2026-11-07T01:59:00Z'))), '2026-11-06T10:00')
+  // 10:00 整换新一轮
+  assert.equal(fmt(currentCampaignStart(Date.parse('2026-11-07T02:00:00Z'))), '2026-11-07T10:00')
+  // 00:30 仍在 11-06 10:00 那一轮里（跨过午夜但没到新的 10:00）
+  assert.equal(fmt(currentCampaignStart(Date.parse('2026-11-06T16:30:00Z'))), '2026-11-06T10:00')
+  // 23:59 属于当天 10:00 那一轮
+  assert.equal(fmt(currentCampaignStart(Date.parse('2026-11-07T15:59:00Z'))), '2026-11-07T10:00')
 })
 
 test('Trae JWT 账号 id 与剩余天数', () => {
@@ -551,3 +632,414 @@ test('搭子手动 Cookie 解析出 csrftoken 来源', () => {
 function makeJwt(exp) {
   return `h.${Buffer.from(JSON.stringify({ exp: Math.floor(exp / 1000), data: { id: 'u' } })).toString('base64url')}.s`
 }
+
+// ── CodeArts（华为云签名）/ CodeBuddy ──
+
+import { sdkDate, signRequest, findDailyActivity } from '../lib/providers/codearts.js'
+import { buddyHeaders, BUDDY_PRODUCTS } from '../lib/providers/buddy.js'
+import { createHash, createHmac } from 'node:crypto'
+
+test('CodeArts x-sdk-date 是 UTC 的 YYYYMMDDTHHMMSSZ', () => {
+  const d = new Date('2026-11-05T09:43:33.123Z')
+  assert.equal(sdkDate(d), '20261105T094333Z')
+  // 冒号、横线、毫秒都要去掉
+  assert.match(sdkDate(d), /^\d{8}T\d{6}Z$/)
+})
+
+test('CodeArts 签名：Authorization 结构与 SignedHeaders 排序正确', () => {
+  const headers = signRequest({
+    ak: 'AKIDTEST',
+    sk: 'SECRETKEY',
+    securityToken: 'TOKEN123',
+    method: 'POST',
+    url: 'https://snap-access.cn-north-4.myhuaweicloud.com/v1/ops/claim',
+    body: JSON.stringify({ campaignId: '1', channel: 'IDE' }),
+  })
+  assert.equal(headers['x-security-token'], 'TOKEN123')
+  assert.equal(headers['content-type'], 'application/json')
+  // host 参与签名但不手动设
+  assert.equal(headers.host, undefined)
+  // POST 的 SignedHeaders 必须含 content-type，且按字典序
+  const m = headers.Authorization.match(/SignedHeaders=([^,]+),Signature=([0-9a-f]{64})$/)
+  assert.ok(m, `Authorization 格式不对：${headers.Authorization}`)
+  assert.equal(m[1], 'content-type;host;x-sdk-content-sha256;x-sdk-date;x-security-token')
+  // 以 Access= 开头（不是 AccessKey=）
+  assert.match(headers.Authorization, /^SDK-HMAC-SHA256 Access=AKIDTEST,/)
+})
+
+test('CodeArts 签名：GET 不带 content-type', () => {
+  const headers = signRequest({
+    ak: 'AK', sk: 'SK', securityToken: 'T',
+    method: 'GET',
+    url: 'https://snap-access.cn-north-4.myhuaweicloud.com/v1/ops/delivery?channel=IDE',
+  })
+  assert.equal(headers['content-type'], undefined)
+  const m = headers.Authorization.match(/SignedHeaders=([^,]+)/)
+  assert.equal(m[1], 'host;x-sdk-content-sha256;x-sdk-date;x-security-token')
+})
+
+test('CodeArts 签名：payload hash 是 body 的 sha256 小写 hex', () => {
+  const body = JSON.stringify({ campaignId: '1', channel: 'IDE' })
+  const headers = signRequest({
+    ak: 'AK', sk: 'SK', securityToken: 'T', method: 'POST',
+    url: 'https://snap-access.cn-north-4.myhuaweicloud.com/v1/ops/claim', body,
+  })
+  const expected = createHash('sha256').update(body).digest('hex')
+  assert.equal(headers['x-sdk-content-sha256'], expected)
+})
+
+test('CodeArts 签名：同一份输入签名可复现（除了时间）', () => {
+  const args = {
+    ak: 'AK', sk: 'SK', securityToken: 'T', method: 'POST',
+    url: 'https://snap-access.cn-north-4.myhuaweicloud.com/v1/ops/claim', body: '{}',
+  }
+  const a = signRequest(args)
+  const b = signRequest(args)
+  // 时间戳同一秒内应一致；签名也必须一致
+  if (a['x-sdk-date'] === b['x-sdk-date']) {
+    assert.equal(a.Authorization, b.Authorization)
+  }
+  assert.equal(a['x-sdk-content-sha256'], b['x-sdk-content-sha256'])
+})
+
+test('CodeArts 找每日登录活动（type=USER_LOGIN）', () => {
+  const items = [
+    { campaignId: '9', type: 'OTHER', claimable: true },
+    { campaignId: '1', type: 'USER_LOGIN', claimable: true, status: 'CLAIMABLE', amount: 1000 },
+  ]
+  const act = findDailyActivity(items)
+  assert.equal(act.campaignId, '1')
+  assert.equal(findDailyActivity([]), undefined)
+  assert.equal(findDailyActivity(undefined), undefined)
+})
+
+test('CodeBuddy 认证头齐全（少一个服务端就回 401 HTML）', () => {
+  const cred = { access_token: 'tok123', user_id: 'u1', enterprise_id: 'e1' }
+  const headers = buddyHeaders(cred, BUDDY_PRODUCTS.cn)
+  assert.equal(headers.Authorization, 'Bearer tok123')
+  assert.equal(headers['X-Domain'], 'copilot.tencent.com')
+  assert.equal(headers['X-Product'], 'SaaS')
+  assert.equal(headers['X-Product-Code'], 'codebuddy')
+  assert.equal(headers['X-User-Id'], 'u1')
+  assert.equal(headers['X-Enterprise-Id'], 'e1')
+  assert.equal(headers['X-Tenant-Id'], 'e1')
+  assert.equal(headers['User-Agent'], 'CodeBuddyIDE/1.106.1')
+})
+
+test('CodeBuddy 没有 user_id / enterprise_id 时不带那些头', () => {
+  const headers = buddyHeaders({ access_token: 't' }, BUDDY_PRODUCTS.intl)
+  assert.equal(headers['X-User-Id'], undefined)
+  assert.equal(headers['X-Enterprise-Id'], undefined)
+  assert.equal(headers['X-Domain'], 'www.workbuddy.ai')
+  assert.equal(headers['X-Product-Code'], 'workbuddy')
+})
+
+test('CodeArts 签名与华为云 SDK-HMAC-SHA256 规范逐字节一致', () => {
+  // 用固定时间戳，独立按规范实现一遍，和 signRequest 的结果比对。
+  // 这是整条 CodeArts 链路最容易错的地方（URI 补斜杠、headers 排序、7 段拼法）。
+  const FIXED = new Date('2026-11-05T09:43:33.123Z')
+  const RealDate = Date
+  const ak = 'AKIDTEST'
+  const sk = 'SecretKey123'
+  const st = 'SecurityToken456'
+  const method = 'POST'
+  const urlStr = 'https://snap-access.cn-north-4.myhuaweicloud.com/v1/ops/claim'
+  const body = JSON.stringify({ campaignId: '1', channel: 'IDE' })
+
+  // 规范值：独立实现，不依赖被测代码
+  const u = new URL(urlStr)
+  const uri = u.pathname.endsWith('/') ? u.pathname : `${u.pathname}/`
+  const payloadHash = createHash('sha256').update(body).digest('hex')
+  const date = '20261105T094333Z'
+  const hdr = {
+    host: u.host,
+    'x-sdk-date': date,
+    'x-sdk-content-sha256': payloadHash,
+    'x-security-token': st,
+    'content-type': 'application/json',
+  }
+  const keys = Object.keys(hdr).sort()
+  const creq = [method, uri, '', keys.map(k => `${k}:${hdr[k]}`).join('\n'), '', keys.join(';'), payloadHash].join('\n')
+  const sts = ['SDK-HMAC-SHA256', date, createHash('sha256').update(creq).digest('hex')].join('\n')
+  const expected = createHmac('sha256', sk).update(sts).digest('hex')
+
+  // 冻结时间后调用被测实现
+  class FrozenDate extends RealDate {
+    constructor(...a) { a.length === 0 ? super(FIXED.getTime()) : super(...a) }
+    static now() { return FIXED.getTime() }
+  }
+  globalThis.Date = FrozenDate
+  let got
+  try {
+    const headers = signRequest({ ak, sk, securityToken: st, method, url: urlStr, body })
+    got = headers.Authorization.match(/Signature=([0-9a-f]+)$/)[1]
+    assert.equal(headers['x-sdk-date'], date, 'x-sdk-date 格式必须是 YYYYMMDDTHHMMSSZ')
+  } finally {
+    globalThis.Date = RealDate
+  }
+  assert.equal(got, expected, '签名与华为云规范不一致')
+})
+
+test('CodeArts 签名里有内容时 payloadHash 不能是空串的 hash', () => {
+  const emptyHash = createHash('sha256').update('').digest('hex')
+  const withBody = signRequest({
+    ak: 'AK', sk: 'SK', securityToken: 'T', method: 'POST',
+    url: 'https://snap-access.cn-north-4.myhuaweicloud.com/v1/ops/claim',
+    body: '{"campaignId":"1"}',
+  })
+  assert.notEqual(withBody['x-sdk-content-sha256'], emptyHash)
+  // 无 body 的 GET 才应该是空串的 hash
+  const noBody = signRequest({
+    ak: 'AK', sk: 'SK', securityToken: 'T', method: 'GET',
+    url: 'https://snap-access.cn-north-4.myhuaweicloud.com/v1/ops/delivery?channel=IDE',
+  })
+  assert.equal(noBody['x-sdk-content-sha256'], emptyHash)
+})
+
+// ── CodeArts 浏览器登录（不用手填 AK/SK）──
+
+import {
+  buildLoginUrl, parseCredentialResponse, expiresAtOf, startCallbackServer,
+} from '../lib/providers/codearts-login.js'
+
+test('CodeArts 登录 URL 结构正确（华为云授权页 + 回调地址）', () => {
+  const url = buildLoginUrl(8791, 'TICKET-123')
+  const u = new URL(url)
+  assert.equal(u.host, 'auth.huaweicloud.com')
+  assert.ok(u.searchParams.has('service'), '必须带 service 参数')
+
+  const inner = new URL(u.searchParams.get('service'))
+  assert.equal(inner.host, 'devcloud.cn-north-4.huaweicloud.com')
+  assert.equal(inner.searchParams.get('auth_callback_url'), 'http://127.0.0.1:8791/authentication')
+  assert.equal(inner.searchParams.get('plugin-name'), 'snap_jetbrains')
+  assert.equal(inner.searchParams.get('ticket_id'), 'TICKET-123')
+})
+
+test('CodeArts 凭据解析认华为云的两种返回形状', () => {
+  // 形状一：credential（下划线命名）
+  const a = parseCredentialResponse({
+    credential: { access: 'AK1', secret: 'SK1', securitytoken: 'ST1', expires_at: '2026-11-07T00:00:00Z' },
+    user_name: 'alice',
+  })
+  assert.equal(a.access_key_id, 'AK1')
+  assert.equal(a.secret_access_key, 'SK1')
+  assert.equal(a.security_token, 'ST1')
+  assert.equal(a.user_name, 'alice')
+
+  // 形状二：result（驼峰命名）
+  const b = parseCredentialResponse({
+    result: { accessKeyId: 'AK2', secretAccessKey: 'SK2', securityToken: 'ST2', expiration: '2026-11-08T00:00:00Z' },
+  })
+  assert.equal(b.access_key_id, 'AK2')
+  assert.equal(b.security_token, 'ST2')
+
+  // 缺 security_token 的不能当有效凭据（签到签名用不了）
+  assert.equal(parseCredentialResponse({ credential: { access: 'AK', secret: 'SK' } }), null)
+  assert.equal(parseCredentialResponse({}), null)
+  assert.equal(parseCredentialResponse(null), null)
+})
+
+test('CodeArts 凭据过期时间可解析，读不出来按一天兜底', () => {
+  const withExp = parseCredentialResponse({
+    credential: { access: 'AK', secret: 'SK', securitytoken: 'ST', expires_at: '2026-11-07T00:00:00Z' },
+  })
+  assert.equal(expiresAtOf(withExp), Date.parse('2026-11-07T00:00:00Z'))
+
+  const noExp = parseCredentialResponse({ credential: { access: 'AK', secret: 'SK', securitytoken: 'ST' } })
+  const fallback = expiresAtOf(noExp)
+  assert.ok(fallback > Date.now() + 23 * 3600_000, '兜底应约一天后')
+})
+
+test('CodeArts 回调服务器：收到 secret 返回页面，缺 secret 拒绝', async () => {
+  // pollAttempts: 1 —— 只打一次 ticket 接口就放弃，别在单测里真等 120 秒
+  const { port, server, done } = await startCallbackServer('TICKET-X', 3000, { pollAttempts: 1 })
+  try {
+    // 不带 secret：拒绝
+    const bad = await fetch(`http://127.0.0.1:${port}/authentication`)
+    assert.equal(bad.status, 400)
+
+    // 别的路径：404
+    const other = await fetch(`http://127.0.0.1:${port}/whatever`)
+    assert.equal(other.status, 404)
+
+    // 带 secret：返回 200 的成功页（然后它会去换凭据，假 ticket 必然失败）
+    const ok = await fetch(`http://127.0.0.1:${port}/authentication?secret=abc`)
+    assert.equal(ok.status, 200)
+    assert.match(await ok.text(), /已收到华为云授权/)
+  } finally {
+    // 假 ticket 换不到真凭据，reject 是预期的；关键是它 reject 而不是崩进程
+    await done.catch(() => {})
+    try { server.close() } catch { /* 已关 */ }
+  }
+})
+
+test('CodeArts 回调服务器超时会 reject 而不是抛未捕获异常', async () => {
+  const { server, done } = await startCallbackServer('TICKET-Y', 300, { pollAttempts: 1 })
+  let caught = null
+  try {
+    await done
+  } catch (error) {
+    caught = error
+  }
+  assert.ok(caught, '超时必须 reject')
+  assert.equal(caught.code, 'CODEARTS_LOGIN_TIMEOUT')
+  try { server.close() } catch { /* 已关 */ }
+})
+
+// ── CodeBuddy 浏览器登录 ──
+
+import { decorateLoginUrl, fetchAuthState } from '../lib/providers/buddy-login.js'
+
+test('CodeBuddy 授权地址补 version 和 loginSessionId', () => {
+  const product = BUDDY_PRODUCTS.cn
+  const decorated = decorateLoginUrl('https://copilot.tencent.com/login?platform=ide&state=abc', product)
+  const u = new URL(decorated)
+  assert.equal(u.searchParams.get('version'), '1.106.1')
+  assert.ok(u.searchParams.get('loginSessionId'), '要带 loginSessionId')
+  assert.equal(u.searchParams.get('state'), 'abc', '原有参数不能丢')
+  // 每次调用会话号不同
+  const again = new URL(decorateLoginUrl('https://copilot.tencent.com/login?state=abc', product))
+  assert.notEqual(again.searchParams.get('loginSessionId'), u.searchParams.get('loginSessionId'))
+})
+
+test('CodeBuddy 不补参数时原样返回', () => {
+  const product = { ...BUDDY_PRODUCTS.cn, appendSessionParams: false }
+  assert.equal(decorateLoginUrl('https://x/y?state=1', product), 'https://x/y?state=1')
+})
+
+test('CodeBuddy 两个产品线的登录身份不同', () => {
+  const cn = BUDDY_PRODUCTS.cn
+  const intl = BUDDY_PRODUCTS.intl
+  assert.equal(cn.endpoint, 'https://copilot.tencent.com')
+  assert.equal(intl.endpoint, 'https://www.workbuddy.ai')
+  assert.equal(cn.platform, 'ide')
+  assert.equal(intl.platform, 'ide')
+  // 版本号必须各自正确，否则登录页会认成别的客户端
+  assert.equal(cn.pluginVersion, '1.106.1')
+  assert.equal(intl.pluginVersion, '5.5.2')
+  assert.ok(cn.appendSessionParams && intl.appendSessionParams)
+})
+
+test('CodeBuddy 真实取 auth/state（端点在线时）', async () => {
+  // 这条会打真实接口；网络不通就跳过，不让测试环境挂掉
+  let r
+  try {
+    r = await fetchAuthState(BUDDY_PRODUCTS.cn)
+  } catch (error) {
+    if (/NETWORK|连不上/.test(error.message)) return
+    throw error
+  }
+  assert.ok(r.state && r.state.length > 8, 'state 应该是一串 uuid')
+  const u = new URL(r.authUrl)
+  assert.equal(u.host, 'copilot.tencent.com')
+  assert.ok(u.searchParams.get('state'), '授权地址要带 state')
+})
+
+// ── 多账号 ──
+
+import { mergeAccountResults, OUTCOME } from '../lib/providers/base.js'
+import { listAccounts, addAccount, removeAccount, saveAccounts } from '../lib/checkin-secrets.js'
+import { mkdtemp as mkdtemp2, writeFile as writeFile2, readFile as readFile2 } from 'node:fs/promises'
+import { tmpdir as tmpdir2 } from 'node:os'
+import { join as join2 } from 'node:path'
+
+test('多账号：老的单账号结构自动当成 1 个账号（不丢凭据）', async () => {
+  const home = await mkdtemp2(join2(tmpdir2(), 'ma-'))
+  const env = { ...process.env, DSH_CHECKIN_ALL_HOME: home }
+  await writeFile2(join2(home, 'secrets.json'), JSON.stringify({
+    checkin: { manual: { lingxi: { wps_sid: 'OLD-SID' } } },
+  }))
+  const list = await listAccounts('lingxi', env)
+  assert.equal(list.length, 1)
+  assert.equal(list[0].wps_sid, 'OLD-SID')
+  assert.equal(list[0].id, '1')
+})
+
+test('多账号：加 / 删 / 清空', async () => {
+  const home = await mkdtemp2(join2(tmpdir2(), 'ma2-'))
+  const env = { ...process.env, DSH_CHECKIN_ALL_HOME: home }
+
+  await addAccount('lingxi', { wps_sid: 'A', name: '主号' }, env)
+  await addAccount('lingxi', { wps_sid: 'B', name: '小号' }, env)
+  let list = await listAccounts('lingxi', env)
+  assert.equal(list.length, 2)
+  assert.equal(list[1].name, '小号')
+
+  await removeAccount('lingxi', '1', env)
+  list = await listAccounts('lingxi', env)
+  assert.equal(list.length, 1)
+  assert.equal(list[0].wps_sid, 'B')
+
+  await saveAccounts('lingxi', [], env)
+  assert.equal((await listAccounts('lingxi', env)).length, 0)
+})
+
+test('多账号：切到 accounts 结构后不留老扁平字段', async () => {
+  const home = await mkdtemp2(join2(tmpdir2(), 'ma3-'))
+  const env = { ...process.env, DSH_CHECKIN_ALL_HOME: home }
+  await writeFile2(join2(home, 'secrets.json'), JSON.stringify({
+    checkin: { manual: { lingxi: { wps_sid: 'OLD' } } },
+  }))
+  await addAccount('lingxi', { wps_sid: 'NEW' }, env)
+  const raw = JSON.parse(await readFile2(join2(home, 'secrets.json'), 'utf8'))
+  const entry = raw.checkin.manual.lingxi
+  assert.ok(Array.isArray(entry.accounts), '应该用 accounts 数组')
+  assert.equal(entry.wps_sid, undefined, '老扁平字段要清掉')
+  assert.equal(entry.accounts.length, 2, '老的也要迁移进来')
+})
+
+test('多账号汇总：两个都签上 → claimed，积分累加', () => {
+  const r = mergeAccountResults('lingxi', [
+    { ok: true, label: '主号', result: { ok: true, outcome: OUTCOME.CLAIMED, points: 100, consecutiveDays: 3 } },
+    { ok: true, label: '小号', result: { ok: true, outcome: OUTCOME.CLAIMED, points: 100, consecutiveDays: 1 } },
+  ], { unit: '智点' })
+  assert.equal(r.outcome, OUTCOME.CLAIMED)
+  assert.equal(r.points, 200)
+  assert.equal(r.accounts, 2)
+  assert.equal(r.consecutiveDays, 3, '连续天数取最大')
+  assert.match(r.message, /2\/2 个账号/)
+})
+
+test('多账号汇总：一个成功一个失败 → 仍算成功，消息里点名失败的', () => {
+  const r = mergeAccountResults('lingxi', [
+    { ok: true, label: '主号', result: { ok: true, outcome: OUTCOME.CLAIMED, points: 100 } },
+    { ok: false, label: '小号', error: 'cookie 过期' },
+  ], { unit: '智点' })
+  assert.equal(r.ok, true)
+  assert.equal(r.outcome, OUTCOME.CLAIMED)
+  assert.match(r.message, /小号/)
+})
+
+test('多账号汇总：全部失败 → failed', () => {
+  const r = mergeAccountResults('lingxi', [
+    { ok: false, label: '主号', error: 'x' },
+    { ok: false, label: '小号', error: 'y' },
+  ])
+  assert.equal(r.ok, false)
+  assert.equal(r.outcome, OUTCOME.FAILED)
+})
+
+test('多账号汇总：全部无任务 → no_task（不算失败）', () => {
+  const r = mergeAccountResults('doubao', [
+    { ok: true, label: '主号', result: { ok: true, outcome: OUTCOME.NO_TASK } },
+    { ok: true, label: '小号', result: { ok: true, outcome: OUTCOME.NO_TASK } },
+  ])
+  assert.equal(r.ok, true)
+  assert.equal(r.outcome, OUTCOME.NO_TASK)
+})
+
+test('多账号汇总：一个签一个已签 → 记 claimed（有新的就报新的）', () => {
+  const r = mergeAccountResults('lingxi', [
+    { ok: true, label: '主号', result: { ok: true, outcome: OUTCOME.ALREADY } },
+    { ok: true, label: '小号', result: { ok: true, outcome: OUTCOME.CLAIMED, points: 100 } },
+  ])
+  assert.equal(r.outcome, OUTCOME.CLAIMED)
+  assert.equal(r.points, 100)
+})
+
+test('多账号汇总：单账号时消息不啰嗦', () => {
+  const r = mergeAccountResults('lingxi', [
+    { ok: true, label: '主号', result: { ok: true, outcome: OUTCOME.CLAIMED, points: 100, message: '签到成功 +100' } },
+  ], { unit: '智点' })
+  assert.equal(r.message, '签到成功 +100', '单账号不要加 N/N 前缀')
+})

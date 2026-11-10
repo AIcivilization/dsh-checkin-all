@@ -72,26 +72,56 @@ function renderIndex() {
     const last = st.lastAttempt
     const todayDone = st.claimedToday
     const on = p.config && p.config.enabled
-    const dot = !p.account || !p.account.loggedIn
-      ? '<span class="cdot bad" title="未登录"></span>'
-      : todayDone
-        ? '<span class="cdot ok" title="今天已签"></span>'
-        : '<span class="cdot warn" title="今天还没签"></span>'
-    const line = last
-      ? (last.ok
-          ? (last.points > 0 ? `+${last.points} ${p.unit}` : todayDone ? '今天已签' : '已签')
-          : '上次失败')
-      : (on ? `${p.config.time} 自动` : '未开启')
-    const streak = st.streak ? `连续 ${st.streak} 天` : ''
+    const lastOutcome = (last && last.outcome) || ''
+    // no_task / not_yet 不是故障：账号没这玩法，或今天还没到轮次
+    const benign = lastOutcome === 'no_task' || lastOutcome === 'not_yet'
+    const needsLogin = lastOutcome === 'needs_login'
+    const loggedIn = Boolean(p.account && p.account.loggedIn)
+
+    // ① 登录状态：✓ 已登录 / ✗ 未登录 / ✗ 登录已过期
+    const loginMark = loggedIn
+      ? '<span class="cmark ok" aria-hidden="true">✓</span>'
+      : '<span class="cmark bad" aria-hidden="true">✗</span>'
+    const loginText = loggedIn
+      ? '已登录'
+      : needsLogin ? '已过期'
+        : (p.account && p.account.label === '登录已过期') ? '已过期'
+          : '未登录'
+
+    // ② 今日签到：✓ 已签 / ○ 还没签 / – 不用签 / ✗ 失败
+    let checkMark
+    let checkText
+    if (!loggedIn) {
+      checkMark = '<span class="cmark idle" aria-hidden="true">–</span>'
+      checkText = '无法签'
+    } else if (todayDone) {
+      checkMark = '<span class="cmark ok" aria-hidden="true">✓</span>'
+      checkText = last && last.points > 0 ? `已签 +${last.points}` : '已签'
+    } else if (benign) {
+      checkMark = '<span class="cmark idle" aria-hidden="true">–</span>'
+      checkText = lastOutcome === 'no_task' ? '无任务' : '未到轮次'
+    } else if (last && !last.ok) {
+      checkMark = '<span class="cmark bad" aria-hidden="true">✗</span>'
+      checkText = '上次失败'
+    } else {
+      checkMark = '<span class="cmark warn" aria-hidden="true">○</span>'
+      checkText = '未签'
+    }
+
+    // 右上角：连续天数。没有连续记录时留一个淡淡的占位，别显示时间
+    // （时间在详情页和 tooltip 里有，这里放会让人误以为是签到时间）
+    const streakText = st.streak ? `连续 ${st.streak} 天` : ''
     return `<button type="button" class="icard${p.id === CURRENT ? ' on' : ''}" data-id="${esc(p.id)}"
-        style="--brand:${esc(p.color)}">
-      <div class="icard-top">
-        <span class="iavatar">${esc(p.short.slice(0, 1))}</span>
-        ${dot}
+        style="--brand:${esc(p.color)}"
+        title="${esc(p.name)}｜${esc(loginText)}｜${esc(checkText)}${st.streak ? `｜连续 ${st.streak} 天` : ''}${on ? `｜每天 ${esc(p.config.time)}` : '｜自动签到已关闭'}">
+      <div class="ihead">
+        <span class="iname">${esc(p.short)}</span>
+        <span class="istreak">${esc(streakText)}</span>
       </div>
-      <div class="iname">${esc(p.short)}</div>
-      <div class="iline">${esc(line)}</div>
-      <div class="imeta">${esc(streak)}</div>
+      <div class="istat">
+        <span class="istat-item">${loginMark}<span class="itxt">${esc(loginText)}</span></span>
+        <span class="istat-item">${checkMark}<span class="itxt">${esc(checkText)}</span></span>
+      </div>
     </button>`
   }).join('')
   for (const btn of box.querySelectorAll('.icard')) {
@@ -121,15 +151,20 @@ function renderDetail() {
     ? `${new Date(last.at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} · ${last.message || last.outcome}`
     : ''
 
-  const canLogin = p.id === 'minimax'
+  const canLogin = p.id === 'minimax' || p.id === 'codearts' || p.id === 'buddy'
+  // 浏览器授权式登录（没有设备码，弹窗里只显示「等待浏览器授权」）
+  const browserLogin = p.id === 'codearts' || p.id === 'buddy'
   // 支持手动配置凭据的服务
-  const canManual = ['lingxi', 'dumate', 'astudio', 'trae'].includes(p.id)
+  const canManual = ['lingxi', 'dumate', 'astudio', 'trae', 'codearts'].includes(p.id)
+  const isDoubao = p.id === 'doubao'
+  const isBuddy = p.id === 'buddy'
   const isQoder = p.id === 'qoder'
   const manualHint = {
     lingxi: 'wps_sid 的值',
     dumate: '完整 Cookie 串（含 bce-user-info）',
     astudio: 'accountId,token,ssoSessionId（逗号分隔）',
     trae: 'Cloud-IDE-JWT token',
+    codearts: '华为云 AK/SK：access_key_id,secret_access_key[,security_token]（逗号分隔）',
   }[p.id]
 
   box.innerHTML = `
@@ -137,9 +172,11 @@ function renderDetail() {
       <div class="card-head">
         <h2>${esc(p.name)}</h2>
         <div class="head-actions">
-          ${canLogin && !account.loggedIn ? '<button class="btn tiny" id="btn-login">登录</button>' : ''}
+          ${canLogin && (!account.loggedIn || p.id === 'buddy') ? '<button class="btn tiny" id="btn-login">登录</button>' : ''}
           ${canManual ? '<button class="btn tiny" id="btn-cred">配置凭据</button>' : ''}
           ${isQoder ? '<button class="btn tiny" id="btn-qoder">配置令牌</button>' : ''}
+          ${isDoubao ? '<button class="btn tiny" id="btn-doubao">配置 Cookie</button>' : ''}
+          ${isBuddy ? '<button class="btn tiny" id="btn-buddy">手动粘贴</button>' : ''}
           <button class="btn tiny primary" id="btn-checkin">立刻签到</button>
         </div>
       </div>
@@ -168,11 +205,17 @@ function renderDetail() {
     <section class="card" id="qoder-card">
       <div class="card-head"><h2>Qoder 令牌</h2><span class="hint" id="qoder-status"></span></div>
       <div class="field">
-        <p class="hint">Qoder 的签到需要「个人访问令牌（PAT）」。获取方式：打开 Qoder → 用量面板 / 设置 → 个人访问令牌，复制后粘贴到这里。国内版和海外版填不同的区域。</p>
+        <p class="hint"><b>先看这里：</b>本机装了 Qoder 桌面 App 并且登录着的话，<b>不用填令牌</b>——插件会自动读 App 里的登录（看上面「登录状态」）。这一栏只用于没有 App、或者想再加一个账号的情况。</p>
+      </div>
+      <div class="field">
+        <p class="hint">令牌在 <b>Qoder 网页版</b>创建，不在桌面 App 里，所以 App 里翻不到。步骤：浏览器登录 Qoder →
+          <a class="link" href="https://qoder.com/account/integrations" target="_blank" rel="noreferrer">海外版 ↗</a> /
+          <a class="link" href="https://qoder.com.cn/account/integrations" target="_blank" rel="noreferrer">国内版 ↗</a> →
+          点「创建令牌」→ 复制。令牌以 <code>pt-</code> 开头，只显示一次。旧版页面可能在「设置 → API 令牌」或「账号 → 集成」下面。</p>
       </div>
       <div class="field">
         <label for="qoder-pat">个人访问令牌（PAT）</label>
-        <input type="password" id="qoder-pat" placeholder="粘贴 PAT">
+        <input type="password" id="qoder-pat" placeholder="pt-... 粘贴令牌">
       </div>
       <div class="field">
         <label for="qoder-name">备注名（可选）</label>
@@ -193,19 +236,78 @@ function renderDetail() {
     </section>
     ` : ''}
 
+    ${isDoubao ? `
+    <section class="card" id="doubao-card">
+      <div class="card-head"><h2>豆包 Cookie</h2><span class="hint" id="doubao-status"></span></div>
+      <div class="field">
+        <p class="hint">豆包的「天天领额度」需要<b>个人账号</b>的登录 Cookie。从浏览器开发者工具 → 网络 → 任意请求的请求头里复制整条 Cookie 粘贴到这里。</p>
+        <p class="hint"><b>工作版 / 飞书企业账号没有这个玩法</b>——服务端任务列表里只有 <code>chat_activity</code>（聊天任务）和累计额度里程碑，没有 <code>daily_signin</code>，签到接口会直接回「系统错误」。这不是 Cookie 的问题，换个人豆包账号登录就行。</p>
+      </div>
+      <div class="field">
+        <label for="doubao-cookie">Cookie（doubao.com）</label>
+        <textarea id="doubao-cookie" rows="3" placeholder="整条 Cookie"></textarea>
+      </div>
+      <div class="field">
+        <label for="doubao-name">备注名（可选）</label>
+        <input type="text" id="doubao-name" placeholder="例如：主号">
+      </div>
+      <div class="actions">
+        <button class="btn primary" id="btn-doubao-add">添加账号</button>
+        <button class="btn" id="btn-doubao-scan">从本机豆包读</button>
+        <span id="doubao-msg" class="hint"></span>
+      </div>
+      <div id="doubao-list" class="field"></div>
+    </section>
+    ` : ''}
+
+    ${isBuddy ? `
+    <section class="card" id="buddy-card">
+      <div class="card-head"><h2>WorkBuddy 账号</h2><span class="hint" id="buddy-status"></span></div>
+      <div class="field">
+        <p class="hint"><b>国内版</b>（copilot.tencent.com）有每日领取；<b>国际版</b>（workbuddy.ai）目前只有模型接入，没有签到。
+          令牌获取：登录对应站点后，打开开发者工具 → 网络 → 任意 API 请求，从请求头里复制 <code>Authorization</code> 的 <code>Bearer</code> 后面那串。</p>
+      </div>
+      <div class="field">
+        <label for="buddy-token">access_token</label>
+        <textarea id="buddy-token" rows="2" placeholder="Bearer 后面那串"></textarea>
+      </div>
+      <div class="field">
+        <label for="buddy-region">产品线</label>
+        <select id="buddy-region">
+          <option value="cn">国内版（有签到）</option>
+          <option value="intl">国际版（无签到）</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="buddy-name">备注名（可选）</label>
+        <input type="text" id="buddy-name" placeholder="例如：主号">
+      </div>
+      <div class="actions">
+        <button class="btn primary" id="btn-buddy-add">添加账号</button>
+        <span id="buddy-msg" class="hint"></span>
+      </div>
+      <div id="buddy-list" class="field"></div>
+    </section>
+    ` : ''}
+
     ${canManual ? `
     <section class="card" id="cred-card">
       <div class="card-head">
-        <h2>凭据配置</h2>
+        <h2>账号</h2>
         <span class="hint" id="cred-status"></span>
       </div>
+      <div id="cred-list" class="field"></div>
       <div class="field">
         <label for="cred-value">${esc(manualHint)}</label>
         <textarea id="cred-value" rows="3" placeholder="${esc(manualHint)}"></textarea>
       </div>
+      <div class="field">
+        <label for="cred-name">备注名（可选，多账号时区分用）</label>
+        <input type="text" id="cred-name" placeholder="例如：主号 / 小号">
+      </div>
       <div class="actions">
-        <button class="btn primary" id="btn-cred-save">保存凭据</button>
-        <button class="btn" id="btn-cred-clear">清除凭据</button>
+        <button class="btn primary" id="btn-cred-save">添加账号</button>
+        <button class="btn" id="btn-cred-clear">清空全部</button>
         <span id="cred-msg" class="hint"></span>
       </div>
     </section>
@@ -265,6 +367,26 @@ function renderDetail() {
     loadQoderList()
   }
 
+  // 豆包 Cookie（多账号）
+  const doubaoBtn = $('#btn-doubao')
+  const doubaoCard = $('#doubao-card')
+  if (doubaoCard && doubaoBtn) {
+    doubaoBtn.onclick = () => { doubaoCard.scrollIntoView({ behavior: 'smooth', block: 'center' }) }
+    $('#btn-doubao-add').onclick = () => addDoubaoCookie()
+    const scanBtn = $('#btn-doubao-scan')
+    if (scanBtn) scanBtn.onclick = () => scanDoubaoCookie()
+    loadDoubaoList()
+  }
+
+  // WorkBuddy（多账号）
+  const buddyBtn = $('#btn-buddy')
+  const buddyCard = $('#buddy-card')
+  if (buddyCard && buddyBtn) {
+    buddyBtn.onclick = () => { buddyCard.scrollIntoView({ behavior: 'smooth', block: 'center' }) }
+    $('#btn-buddy-add').onclick = () => addBuddyAccount()
+    loadBuddyList()
+  }
+
   // 手动凭据配置
   const credBtn = $('#btn-cred')
   const credCard = $('#cred-card')
@@ -279,6 +401,153 @@ function renderDetail() {
   const cached = PANELS.get(p.id)
   if (cached) renderWeek(cached)
   else loadPanel(p.id)
+}
+
+/** 加载豆包 Cookie 列表 */
+async function loadDoubaoList() {
+  const box = $('#doubao-list')
+  const status = $('#doubao-status')
+  if (!box) return
+  try {
+    const r = await api('/doubao')
+    if (!r.ok) { box.innerHTML = `<span class="muted">${esc(r.message || '读取失败')}</span>`; return }
+    const list = r.doubaos || []
+    if (status) status.textContent = list.length ? `已配置 ${list.length} 个账号` : '未配置'
+    if (!list.length) { box.innerHTML = '<span class="muted">还没有配置 Cookie</span>'; return }
+    box.innerHTML = list.map((d) => `
+      <div class="row">
+        <span class="label">${esc(d.name || `#${d.id}`)}${d.from ? ` · 来自${esc(d.from)}` : ''}</span>
+        <span class="value">
+          <button class="btn tiny" data-doubao-del="${esc(d.id)}">删除</button>
+        </span>
+      </div>`).join('')
+    for (const btn of box.querySelectorAll('[data-doubao-del]')) {
+      btn.onclick = () => removeDoubaoCookie(btn.dataset.doubaoDel)
+    }
+  } catch (e) {
+    box.innerHTML = `<span class="muted">${esc(e.message)}</span>`
+  }
+}
+
+/** 添加豆包 Cookie */
+async function addDoubaoCookie() {
+  const msg = $('#doubao-msg')
+  const cookie = $('#doubao-cookie').value.trim()
+  const name = $('#doubao-name').value.trim()
+  if (!cookie) { if (msg) msg.textContent = '请输入 Cookie'; return }
+  try {
+    const r = await api('/doubao', { method: 'POST', body: { cookie, name } })
+    if (r.ok) {
+      if (msg) { msg.textContent = '已添加'; setTimeout(() => { if (msg) msg.textContent = '' }, 2500) }
+      $('#doubao-cookie').value = ''
+      $('#doubao-name').value = ''
+      loadDoubaoList()
+      await refresh({ withPanels: false })
+    } else if (msg) {
+      msg.textContent = r.message || '添加失败'
+    }
+  } catch (e) {
+    if (msg) msg.textContent = `添加失败：${e.message}`
+  }
+}
+
+/** 加载 WorkBuddy 账号列表 */
+async function loadBuddyList() {
+  const box = $('#buddy-list')
+  const status = $('#buddy-status')
+  if (!box) return
+  try {
+    const r = await api('/buddy')
+    if (!r.ok) { box.innerHTML = `<span class="muted">${esc(r.message || '读取失败')}</span>`; return }
+    const list = r.accounts || []
+    if (status) status.textContent = list.length ? `已配置 ${list.length} 个账号` : '未配置'
+    if (!list.length) { box.innerHTML = '<span class="muted">还没有配置账号</span>'; return }
+    box.innerHTML = list.map((a, i) => `
+      <div class="row">
+        <span class="label">${esc(a.name || (a.region === 'intl' ? '国际版' : '国内版'))}</span>
+        <span class="value"><button class="btn tiny" data-buddy-del="${i}">删除</button></span>
+      </div>`).join('')
+    for (const btn of box.querySelectorAll('[data-buddy-del]')) {
+      btn.onclick = () => removeBuddyAccount(Number(btn.dataset.buddyDel))
+    }
+  } catch (e) {
+    box.innerHTML = `<span class="muted">${esc(e.message)}</span>`
+  }
+}
+
+/** 添加 WorkBuddy 账号 */
+async function addBuddyAccount() {
+  const msg = $('#buddy-msg')
+  const token = $('#buddy-token').value.trim()
+  const region = $('#buddy-region').value
+  const name = $('#buddy-name').value.trim()
+  if (!token) { if (msg) msg.textContent = '请输入 access_token'; return }
+  try {
+    const r = await api('/buddy', { method: 'POST', body: { token, region, name } })
+    if (r.ok) {
+      if (msg) { msg.textContent = '已添加'; setTimeout(() => { if (msg) msg.textContent = '' }, 2500) }
+      $('#buddy-token').value = ''
+      $('#buddy-name').value = ''
+      loadBuddyList()
+      await refresh({ withPanels: false })
+    } else if (msg) {
+      msg.textContent = r.message || '添加失败'
+    }
+  } catch (e) {
+    if (msg) msg.textContent = `添加失败：${e.message}`
+  }
+}
+
+/** 删除 WorkBuddy 账号（按索引） */
+async function removeBuddyAccount(index) {
+  const msg = $('#buddy-msg')
+  try {
+    const r = await api(`/buddy?index=${index}`, { method: 'DELETE' })
+    if (r.ok) {
+      if (msg) { msg.textContent = '已删除'; setTimeout(() => { if (msg) msg.textContent = '' }, 2500) }
+      loadBuddyList()
+      await refresh({ withPanels: false })
+    } else if (msg) {
+      msg.textContent = r.message || '删除失败'
+    }
+  } catch (e) {
+    if (msg) msg.textContent = `删除失败：${e.message}`
+  }
+}
+
+/** 从本机豆包电脑版 / 浏览器读 Cookie（macOS 会问一次钥匙串权限） */
+async function scanDoubaoCookie() {
+  const msg = $('#doubao-msg')
+  if (msg) msg.textContent = '正在读本机豆包的登录…'
+  try {
+    const r = await api('/doubao', { method: 'POST', body: { fromLocal: true } })
+    if (r.ok) {
+      if (msg) { msg.textContent = `已从「${r.from || '本机豆包'}」读到了`; setTimeout(() => { if (msg) msg.textContent = '' }, 3000) }
+      loadDoubaoList()
+      await refresh({ withPanels: false })
+    } else if (msg) {
+      msg.textContent = r.message || '读取失败'
+    }
+  } catch (e) {
+    if (msg) msg.textContent = `读取失败：${e.message}`
+  }
+}
+
+/** 删除豆包 Cookie */
+async function removeDoubaoCookie(id) {
+  const msg = $('#doubao-msg')
+  try {
+    const r = await api(`/doubao?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
+    if (r.ok) {
+      if (msg) { msg.textContent = '已删除'; setTimeout(() => { if (msg) msg.textContent = '' }, 2500) }
+      loadDoubaoList()
+      await refresh({ withPanels: false })
+    } else if (msg) {
+      msg.textContent = r.message || '删除失败'
+    }
+  } catch (e) {
+    if (msg) msg.textContent = `删除失败：${e.message}`
+  }
 }
 
 /** 加载 Qoder 令牌列表（脱敏显示） */
@@ -348,79 +617,113 @@ async function removeQoderPat(id) {
 }
 
 /** 读某个服务的手动凭据状态（脱敏，只显示「已配置」） */
+/** 各服务的凭据字段（多账号里每个账号存的就是这些） */
+const CRED_FIELDS = {
+  lingxi: (v) => ({ wps_sid: v }),
+  dumate: (v) => ({ cookie: v }),
+  astudio: (v) => {
+    const [accountId, token, ssoSessionId] = v.split(',').map(x => x.trim())
+    if (!accountId || !token) return { error: 'AStudio 需要 accountId 和 token（逗号分隔）' }
+    return { accountId, token, ...(ssoSessionId ? { ssoSessionId } : {}) }
+  },
+  trae: (v) => ({ token: v }),
+  codearts: (v) => {
+    const [access_key_id, secret_access_key, security_token] = v.split(',').map(x => x.trim())
+    if (!access_key_id || !secret_access_key) return { error: 'CodeArts 需要 access_key_id 和 secret_access_key（逗号分隔）' }
+    return { access_key_id, secret_access_key, ...(security_token ? { security_token } : {}) }
+  },
+  doubao: (v) => ({ cookie: v }),
+}
+
+/** 加载账号列表（多账号） */
 async function loadCredentialStatus(id) {
+  const box = $('#cred-list')
   const status = $('#cred-status')
-  if (!status) return
+  if (!box) return
   try {
-    const r = await api(`/credential?id=${encodeURIComponent(id)}`)
-    if (r.ok && r.manual && r.manual[id]?.configured) {
-      status.textContent = '已配置（重新保存会覆盖）'
-      status.className = 'hint ok'
-    } else {
-      status.textContent = '未配置'
-      status.className = 'hint'
+    const r = await api(`/accounts?provider=${encodeURIComponent(id)}`)
+    if (!r.ok) { box.innerHTML = `<span class="muted">${esc(r.message || '读取失败')}</span>`; return }
+    const list = r.accounts || []
+    if (status) {
+      status.textContent = list.length ? `${list.length} 个账号` : '还没有账号'
+      status.className = list.length ? 'hint ok' : 'hint'
+    }
+    if (!list.length) {
+      box.innerHTML = '<span class="muted">还没有配置账号</span>'
+      return
+    }
+    box.innerHTML = list.map((a) => `
+      <div class="row">
+        <span class="label">${esc(a.name || `账号 #${a.id}`)}</span>
+        <span class="value"><button class="btn tiny" data-cred-del="${esc(a.id)}">删除</button></span>
+      </div>`).join('')
+    for (const btn of box.querySelectorAll('[data-cred-del]')) {
+      btn.onclick = () => removeCredentialAccount(id, btn.dataset.credDel)
     }
   } catch (e) {
-    status.textContent = e.message
-    status.className = 'hint bad'
+    box.innerHTML = `<span class="muted">${esc(e.message)}</span>`
   }
 }
 
-/** 保存手动凭据 */
+/** 添加一个账号 */
 async function saveCredential(id) {
   const value = $('#cred-value').value.trim()
+  const name = ($('#cred-name') && $('#cred-name').value.trim()) || ''
   const msg = $('#cred-msg')
-  if (!value) {
-    if (msg) msg.textContent = '请输入凭据值'
-    return
-  }
-  let entry
-  if (id === 'astudio') {
-    const [accountId, token, ssoSessionId] = value.split(',').map(s => s.trim())
-    if (!accountId || !token) {
-      if (msg) msg.textContent = 'AStudio 需要 accountId 和 token（逗号分隔）'
-      return
-    }
-    entry = { accountId, token, ...(ssoSessionId ? { ssoSessionId } : {}) }
-  } else if (id === 'lingxi') {
-    entry = { wps_sid: value }
-  } else if (id === 'dumate') {
-    entry = { cookie: value }
-  } else if (id === 'trae') {
-    entry = { token: value }
-  } else {
-    if (msg) msg.textContent = '这个服务不支持手动配置'
-    return
-  }
+  if (!value) { if (msg) msg.textContent = '请输入凭据值'; return }
+  const make = CRED_FIELDS[id]
+  if (!make) { if (msg) msg.textContent = '这个服务不支持手动配置'; return }
+  const fields = make(value)
+  if (fields.error) { if (msg) msg.textContent = fields.error; return }
   try {
-    const r = await api(`/credential?id=${encodeURIComponent(id)}`, { method: 'POST', body: { entry } })
+    const r = await api(`/accounts?provider=${encodeURIComponent(id)}`, {
+      method: 'POST', body: { entry: { ...fields, ...(name ? { name } : {}) } },
+    })
     if (r.ok) {
-      if (msg) { msg.textContent = '已保存'; setTimeout(() => { if (msg) msg.textContent = '' }, 2500) }
+      if (msg) { msg.textContent = `已添加（#${r.id}）`; setTimeout(() => { if (msg) msg.textContent = '' }, 2500) }
       $('#cred-value').value = ''
+      if ($('#cred-name')) $('#cred-name').value = ''
       loadCredentialStatus(id)
       await refresh({ withPanels: false })
     } else if (msg) {
-      msg.textContent = r.message || '保存失败'
+      msg.textContent = r.message || '添加失败'
     }
   } catch (e) {
-    if (msg) msg.textContent = `保存失败：${e.message}`
+    if (msg) msg.textContent = `添加失败：${e.message}`
   }
 }
 
-/** 清除手动凭据（回退到 App 文件读取） */
+/** 删一个账号 */
+async function removeCredentialAccount(id, accountId) {
+  const msg = $('#cred-msg')
+  try {
+    const r = await api(`/accounts?provider=${encodeURIComponent(id)}&id=${encodeURIComponent(accountId)}`, { method: 'DELETE' })
+    if (r.ok) {
+      if (msg) { msg.textContent = '已删除'; setTimeout(() => { if (msg) msg.textContent = '' }, 2500) }
+      loadCredentialStatus(id)
+      await refresh({ withPanels: false })
+    } else if (msg) {
+      msg.textContent = r.message || '删除失败'
+    }
+  } catch (e) {
+    if (msg) msg.textContent = `删除失败：${e.message}`
+  }
+}
+
+/** 清空该服务的全部账号 */
 async function clearCredential(id) {
   const msg = $('#cred-msg')
   try {
-    const r = await api(`/credential?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
-    if (r.ok) {
-      if (msg) { msg.textContent = '已清除'; setTimeout(() => { if (msg) msg.textContent = '' }, 2500) }
-      loadCredentialStatus(id)
-      await refresh({ withPanels: false })
-    } else if (msg) {
-      msg.textContent = r.message || '清除失败'
+    const list = (await api(`/accounts?provider=${encodeURIComponent(id)}`)).accounts || []
+    if (!list.length) { if (msg) msg.textContent = '本来就没有账号'; return }
+    for (const a of list) {
+      await api(`/accounts?provider=${encodeURIComponent(id)}&id=${encodeURIComponent(a.id)}`, { method: 'DELETE' })
     }
+    if (msg) { msg.textContent = '已清空'; setTimeout(() => { if (msg) msg.textContent = '' }, 2500) }
+    loadCredentialStatus(id)
+    await refresh({ withPanels: false })
   } catch (e) {
-    if (msg) msg.textContent = `清除失败：${e.message}`
+    if (msg) msg.textContent = `清空失败：${e.message}`
   }
 }
 
@@ -636,22 +939,58 @@ async function saveProviderConfig(id) {
 /* ── 登录（只有 MiniMax 支持设备码） ── */
 
 let loginPoll = 0
-async function startLogin(id) {
+async function startLogin(id, opts = {}) {
   hideBanner()
   try {
-    const info = await api(`/login/start?id=${encodeURIComponent(id)}`, { method: 'POST' })
+    // WorkBuddy 要带 region（国内版 / 国际版）
+    const region = id === 'buddy' ? (($('#buddy-region') && $('#buddy-region').value) || 'cn') : undefined
+    const qs = region ? `&region=${encodeURIComponent(region)}` : ''
+    const info = await api(`/login/start?id=${encodeURIComponent(id)}${qs}`, { method: 'POST' })
     if (!info.ok) {
       banner(info.message || '申请登录码失败', 'bad')
       return
     }
+    const isBrowserLogin = info.userCode === '' || info.userCode === undefined
     $('#login').classList.remove('hidden')
     $('#login-title').textContent = `登录 ${providerOf(id) ? providerOf(id).name : ''}`
-    $('#login-code').textContent = info.userCode
+    // 浏览器授权式登录没有设备码：把码框藏起来，只留「去授权」链接
+    const codeBox = $('#login-code') && $('#login-code').closest('.code-box')
+    if (codeBox) codeBox.style.display = isBrowserLogin ? 'none' : ''
+    const copyBtn = $('#copy-code')
+    if (copyBtn) copyBtn.style.display = isBrowserLogin ? 'none' : ''
+    $('#login-code').textContent = info.userCode || ''
     $('#login-link').href = info.verificationUriComplete || info.verificationUri
-    $('#login-link').textContent = info.verificationUriComplete || info.verificationUri
-    $('#login-status').textContent = `等待确认…（${Math.round(info.expiresInSec / 60)} 分钟内有效）`
+    $('#login-link').textContent = isBrowserLogin ? '打开华为云登录页 ↗' : (info.verificationUriComplete || info.verificationUri)
+    if (isBrowserLogin) {
+      const mins = Math.round((info.expiresInSec || 180) / 60)
+      $('#login-hint').textContent = info.opened
+        ? `已在浏览器打开华为云登录页。在那里登录并同意授权，这个窗口会自动完成（${mins} 分钟内有效）。`
+        : `浏览器没自动打开的话，点下面的链接登录并授权（${mins} 分钟内有效）。`
+      $('#login-status').textContent = '等待浏览器授权…'
+    } else {
+      $('#login-hint').textContent = '在浏览器里打开下面的地址，输入设备码确认一次即可（和 App 里登录是同一个流程）。'
+      $('#login-status').textContent = `等待确认…（${Math.round(info.expiresInSec / 60)} 分钟内有效）`
+    }
 
     clearInterval(loginPoll)
+    if (isBrowserLogin) {
+      // 浏览器授权式：/login/wait 是一次性的长请求（服务端等到回调才返回），
+      // 所以只发一次，不要每 3 秒重发——否则会在服务端堆出一串等待。
+      $('#login-status').textContent = '等待浏览器授权…'
+      try {
+        const r = await api(`/login/wait?id=${encodeURIComponent(id)}${qs}`, { method: 'POST' })
+        if (r.ok) {
+          $('#login').classList.add('hidden')
+          banner(`${id === 'buddy' ? 'WorkBuddy' : 'CodeArts'} 登录成功，凭据已保存`, 'ok')
+          await refresh()
+        } else {
+          $('#login-status').textContent = r.message || '登录失败'
+        }
+      } catch (e) {
+        $('#login-status').textContent = `登录失败：${e.message}`
+      }
+      return
+    }
     loginPoll = setInterval(async () => {
       try {
         const r = await api(`/login/wait?id=${encodeURIComponent(id)}`, { method: 'POST' })

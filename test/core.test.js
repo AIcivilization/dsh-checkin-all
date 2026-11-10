@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, rm, writeFile, mkdir, stat } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile, mkdir, stat, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -8,8 +8,9 @@ import {
   CLIENT_ID, credentialAccount, credentialKey, listNamespaces, matrixOrigin, accountOrigin, namespacePaths,
 } from '../lib/paths.js'
 import { normalizePanel, describePanel, localTimeZone, DAY_STATUS } from '../lib/signin.js'
-import { dayKey, claimedToday, DEFAULT_CONFIG, loadConfig, saveConfig, providerConfig } from '../lib/store.js'
-import { nextRunAt, isDue } from '../lib/scheduler.js'
+import { dayKey, claimedToday, DEFAULT_CONFIG, loadConfig, saveConfig, providerConfig, recordAttempt, loadState, statePath } from '../lib/store.js'
+import { isDue, minutesPastDue, backoffMs } from '../lib/scheduler.js'
+import { CHECKIN_TZ, beijingDayKey, shiftDayKey, streakFromDays, beijingMinutes } from '../lib/tz.js'
 import { activeNamespace, readCredential, usableCredential, CredentialError } from '../lib/credentials.js'
 
 const panel = {
@@ -125,9 +126,11 @@ test('没有凭据时报 AUTH_REQUIRED', async () => {
   await rm(dir, { recursive: true, force: true })
 })
 
-test('日期键按本地时区算', () => {
-  const day = dayKey(new Date(2026, 10, 1, 23, 30), '')
-  assert.equal(day, '2026-11-01')
+test('日期键固定按北京时间算，不随本机时区', () => {
+  // UTC 2026-11-01 23:30 = 北京 2026-11-02 07:30
+  assert.equal(dayKey(new Date('2026-11-01T23:30:00Z'), ''), '2026-11-02')
+  // 传任何 timeZone 参数都不影响（老调用兼容）
+  assert.equal(dayKey(new Date('2026-11-01T23:30:00Z'), 'America/Los_Angeles'), '2026-11-02')
 })
 
 test('claimedToday 认 claimed 和 already_claimed（按服务）', () => {
@@ -141,22 +144,72 @@ test('claimedToday 认 claimed 和 already_claimed（按服务）', () => {
   assert.equal(claimedToday(st, 'lingxi', ''), false)
 })
 
-test('下一次签到时间在将来，且时间点正确', () => {
-  const now = new Date(2026, 10, 1, 8, 0, 0)
-  const at = nextRunAt('09:00', now)
-  assert.equal(at.getHours(), 9)
-  assert.equal(at.getMinutes(), 0)
-  assert.equal(at.getDate(), 1)
-  // 已经过了今天的时间点 → 明天
-  const later = nextRunAt('09:00', new Date(2026, 10, 1, 10, 0, 0))
-  assert.equal(later.getDate(), 2)
-  assert.ok(later.getTime() > new Date(2026, 10, 1, 10, 0, 0).getTime())
+test('isDue 按北京时间判断到点没到点', () => {
+  // 北京时间 08:59 还没到 09:00
+  assert.equal(isDue('09:00', new Date('2026-11-01T00:59:00Z')), false)
+  // 北京时间 09:00:01 到了
+  assert.equal(isDue('09:00', new Date('2026-11-01T01:00:01Z')), true)
+  // 北京时间 23:00 当然也过了
+  assert.equal(isDue('09:00', new Date('2026-11-01T15:00:00Z')), true)
 })
 
-test('isDue 判断到点没到点', () => {
-  assert.equal(isDue('09:00', new Date(2026, 10, 1, 8, 59, 0)), false)
-  assert.equal(isDue('09:00', new Date(2026, 10, 1, 9, 0, 1)), true)
-  assert.equal(isDue('09:00', new Date(2026, 10, 1, 23, 0, 0)), true)
+test('本机在美西也不会错日：北京时间才是签到窗口', () => {
+  // 美西 2026-11-04 21:00 = 北京 2026-11-05 12:00
+  const la9pm = new Date('2026-11-05T05:00:00Z')
+  assert.equal(beijingDayKey(la9pm), '2026-11-05')
+  // 按北京已经是 12:00，09:00 的签到早就该做了
+  assert.equal(isDue('09:00', la9pm), true)
+  // 北京 13:00 - 09:00 = 240 分钟
+  assert.equal(minutesPastDue('09:00', la9pm), 240)
+})
+
+test('beijingMinutes / shiftDayKey 跨月跨年正确', () => {
+  assert.equal(beijingMinutes(new Date('2026-11-05T05:00:00Z')), 13 * 60)
+  assert.equal(shiftDayKey('2026-11-01', -1), '2026-10-31')
+  assert.equal(shiftDayKey('2026-01-01', -1), '2025-12-31')
+  assert.equal(shiftDayKey('2026-12-31', 1), '2027-01-01')
+})
+
+test('连续天数按账本重算，不是累加（重复记录不会虚增）', () => {
+  const days = {
+    '2026-11-01': { outcome: 'claimed', points: 10 },
+    '2026-11-02': { outcome: 'claimed', points: 10 },
+    '2026-11-03': { outcome: 'claimed', points: 10 },
+  }
+  // 以 2026-11-03 为「今天」→ 连续 3 天
+  assert.equal(streakFromDays(days, new Date('2026-11-03T04:00:00Z')), 3)
+  // 同一天再记一次（对象还是那份），仍然是 3，不会变 4
+  const again = { ...days, '2026-11-03': { outcome: 'claimed', points: 10 } }
+  assert.equal(streakFromDays(again, new Date('2026-11-03T04:00:00Z')), 3)
+})
+
+test('断签一天连续天数归零重来', () => {
+  const days = {
+    '2026-11-01': { outcome: 'claimed', points: 10 },
+    // 11-02 断了
+    '2026-11-03': { outcome: 'claimed', points: 10 },
+  }
+  // 今天 11-03：只算 11-03 这一天
+  assert.equal(streakFromDays(days, new Date('2026-11-03T04:00:00Z')), 1)
+})
+
+test('dry-run 和失败不算进连续天数', () => {
+  const days = {
+    '2026-11-02': { outcome: 'claimed', points: 10 },
+    '2026-11-03': { outcome: 'dry-run', points: 0 },
+  }
+  // 11-03 只是看了没领 → 今天不算签过，从 11-02 往前数
+  assert.equal(streakFromDays(days, new Date('2026-11-03T04:00:00Z')), 1)
+  const failDays = { '2026-11-03': { outcome: 'failed', points: 0 } }
+  assert.equal(streakFromDays(failDays, new Date('2026-11-03T04:00:00Z')), 0)
+})
+
+test('失败退避逐次拉长并封顶', () => {
+  assert.equal(backoffMs(0), 0)
+  assert.equal(backoffMs(1), 60_000)
+  assert.equal(backoffMs(2), 120_000)
+  assert.equal(backoffMs(3), 240_000)
+  assert.ok(backoffMs(99) <= 60 * 60_000, '退避要封顶在 1 小时')
 })
 
 test('默认设置合理', () => {
@@ -447,4 +500,238 @@ test('client.js 里没有任何 BASE + path 的裸拼接', async () => {
   const { readFile } = await import('node:fs/promises')
   const src = await readFile(new URL('../plugin/client.js', import.meta.url), 'utf8')
   assert.equal(/fetch\(\s*BASE\s*\+/.test(src), false, '还在用 BASE + path 拼地址')
+})
+
+// ── 记账链路的集成回归（对应真实踩过的坑）──
+
+test('同一天重复记不会虚增连续天数，也不会重复加分', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dshmm-rec-'))
+  const env = { ...process.env, HOME: dir, DSH_CHECKIN_ALL_HOME: join(dir, 'plugin') }
+  try {
+    const day = dayKey(new Date(), '')
+    const base = { ok: true, outcome: 'claimed', points: 50, dayNo: 1, day, timeZone: CHECKIN_TZ }
+    await recordAttempt('t', base, env)
+    let st = await loadState(env)
+    assert.equal(st.providers.t.streak, 1)
+    assert.equal(st.providers.t.totalPoints, 50)
+
+    // 重复三次（auto + manual + 面板各点一次的真实情况）
+    for (let i = 0; i < 3; i += 1) await recordAttempt('t', base, env)
+    st = await loadState(env)
+    assert.equal(st.providers.t.streak, 1, '同一天重复记录不能把连续天数加上去')
+    assert.equal(st.providers.t.totalPoints, 50, '同一天重复记录不能重复加分')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('dry-run 不写账本、不算已签', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dshmm-dry-'))
+  const env = { ...process.env, HOME: dir, DSH_CHECKIN_ALL_HOME: join(dir, 'plugin') }
+  try {
+    const day = dayKey(new Date(), '')
+    await recordAttempt('t', { ok: true, outcome: 'dry-run', points: 0, day, timeZone: CHECKIN_TZ }, env)
+    const st = await loadState(env)
+    assert.deepEqual(Object.keys(st.providers.t.days), [], 'dry-run 不该写进 days')
+    assert.equal(st.providers.t.streak, 0)
+    assert.equal(claimedToday(st, 't', CHECKIN_TZ), false, 'dry-run 不能算今天已签')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('失败不写 days，靠调度器退避兜住（不会每分钟重试到天亮）', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dshmm-fail-'))
+  const env = { ...process.env, HOME: dir, DSH_CHECKIN_ALL_HOME: join(dir, 'plugin') }
+  try {
+    await recordAttempt('t', { ok: false, outcome: 'ASTUDIO_NOT_LOGGED_IN', points: 0, message: '没登录' }, env)
+    const st = await loadState(env)
+    assert.deepEqual(Object.keys(st.providers.t.days), [])
+    assert.equal(st.providers.t.lastAttempt.outcome, 'ASTUDIO_NOT_LOGGED_IN')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('服务端连续天数优先：服务端断了本地要跟着断', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dshmm-srv-'))
+  const env = { ...process.env, HOME: dir, DSH_CHECKIN_ALL_HOME: join(dir, 'plugin') }
+  try {
+    const day = dayKey(new Date(), '')
+    // 本地连续记了几天
+    await recordAttempt('t', { ok: true, outcome: 'claimed', points: 10, day, timeZone: CHECKIN_TZ }, env)
+    // 服务端说这次只有第 1 天（说明中途断过）
+    await recordAttempt('t', {
+      ok: true, outcome: 'already_claimed', points: 0, day, dayNo: 1, consecutiveDays: 1, timeZone: CHECKIN_TZ,
+    }, env)
+    const st = await loadState(env)
+    assert.equal(st.providers.t.streak, 1, '服务端归零后本地不能还挂着旧数字')
+    assert.equal(st.providers.t.serverStreak, 1)
+    assert.equal(st.providers.t.totalPoints, 10, 'already_claimed 不能把之前的分抹掉')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('no_task / not_yet 不算今天签过，也不计连续天数', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dshmm-benign-'))
+  const env = { ...process.env, HOME: dir, DSH_CHECKIN_ALL_HOME: join(dir, 'plugin') }
+  try {
+    const day = dayKey(new Date(), '')
+    // 账号没有签到玩法
+    await recordAttempt('t', { ok: true, outcome: 'no_task', points: 0, day, timeZone: CHECKIN_TZ }, env)
+    let st = await loadState(env)
+    assert.deepEqual(Object.keys(st.providers.t.days), [], 'no_task 不该写进 days')
+    assert.equal(st.providers.t.streak, 0)
+    assert.equal(claimedToday(st, 't', CHECKIN_TZ), false)
+
+    // 今天还没到轮次
+    await recordAttempt('t', { ok: true, outcome: 'not_yet', points: 0, day, timeZone: CHECKIN_TZ }, env)
+    st = await loadState(env)
+    assert.deepEqual(Object.keys(st.providers.t.days), [], 'not_yet 不该写进 days')
+    assert.equal(claimedToday(st, 't', CHECKIN_TZ), false, 'not_yet 时不能标成今天已签')
+    assert.equal(st.providers.t.lastAttempt.outcome, 'not_yet', '但要记住上次是「还没轮次」')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('服务端没给连续天数时不清零本地（AStudio 这类）', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dshmm-nosrv-'))
+  const env = { ...process.env, HOME: dir, DSH_CHECKIN_ALL_HOME: join(dir, 'plugin') }
+  try {
+    const day = dayKey(new Date(), '')
+    await recordAttempt('t', { ok: true, outcome: 'claimed', points: 100, day, timeZone: CHECKIN_TZ }, env)
+    await recordAttempt('t', { ok: true, outcome: 'already_claimed', points: 0, day, timeZone: CHECKIN_TZ }, env)
+    const st = await loadState(env)
+    assert.equal(st.providers.t.streak, 1, '没有服务端天数时用本地重算的结果')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+// ── 凭据存储安全 ──
+
+test('凭据目录和文件权限：700 / 600，且目录被改宽后会自动收紧', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dshmm-perm-'))
+  const home = join(dir, 'checkin')
+  const env = { ...process.env, HOME: dir, DSH_CHECKIN_ALL_HOME: home }
+  try {
+    const { setManual } = await import('../lib/checkin-secrets.js')
+    await setManual('lingxi', { wps_sid: 'test-value' }, env)
+
+    const dirMode = (await stat(home)).mode & 0o777
+    const fileMode = (await stat(join(home, 'secrets.json'))).mode & 0o777
+    assert.equal(dirMode.toString(8), '700', '凭据目录必须 700')
+    assert.equal(fileMode.toString(8), '600', 'secrets.json 必须 600')
+
+    // 模拟被人手动改成 755（真实踩到过：mkdir 的 mode 对已存在目录不生效）
+    const { chmod } = await import('node:fs/promises')
+    await chmod(home, 0o755)
+    assert.equal(((await stat(home)).mode & 0o777).toString(8), '755')
+
+    // 再写一次，应该自动收紧回 700
+    await setManual('lingxi', { wps_sid: 'again' }, env)
+    assert.equal(((await stat(home)).mode & 0o777).toString(8), '700', '写入时应重新收紧目录权限')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('签到历史里不含任何凭据', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dshmm-state-'))
+  const env = { ...process.env, HOME: dir, DSH_CHECKIN_ALL_HOME: join(dir, 'plugin') }
+  try {
+    await recordAttempt('lingxi', { ok: true, outcome: 'claimed', points: 100, day: '2026-11-07' }, env)
+    const raw = await readFile(statePath(env), 'utf8')
+    for (const word of ['wps_sid', 'cookie', 'access_token', 'secret_access_key', 'security_token', 'refresh_token']) {
+      assert.ok(!raw.includes(word), `state.json 不该出现 ${word}`)
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+// ── 索引卡片：登录状态 + 今日签到（两行都要有）──
+
+/** 复刻 panel.js renderIndex 里的判定，确保逻辑和面板一致 */
+function cardText(p) {
+  const st = p.state || {}
+  const last = st.lastAttempt
+  const todayDone = st.claimedToday
+  const lastOutcome = (last && last.outcome) || ''
+  const benign = lastOutcome === 'no_task' || lastOutcome === 'not_yet'
+  const needsLogin = lastOutcome === 'needs_login'
+  const loggedIn = Boolean(p.account && p.account.loggedIn)
+
+  const loginText = loggedIn ? '已登录'
+    : needsLogin ? '登录已过期'
+      : (p.account && p.account.label === '登录已过期') ? '登录已过期' : '未登录'
+
+  let checkText
+  if (!loggedIn) checkText = '无法签到'
+  else if (todayDone) checkText = last && last.points > 0 ? `今日已签 +${last.points}` : '今日已签'
+  else if (benign) checkText = lastOutcome === 'no_task' ? '无签到任务' : '还没到轮次'
+  else if (last && !last.ok) checkText = '上次失败'
+  else checkText = '今日未签'
+
+  return { loginText, checkText }
+}
+
+test('索引卡片：已登录且今天签过 → 两行都正确', () => {
+  const c = cardText({
+    account: { loggedIn: true },
+    state: { claimedToday: true, lastAttempt: { ok: true, points: 400, outcome: 'claimed' } },
+  })
+  assert.equal(c.loginText, '已登录')
+  assert.equal(c.checkText, '今日已签 +400')
+})
+
+test('索引卡片：凭据过期 → 登录状态要明说，签到栏不能装作正常', () => {
+  const c = cardText({
+    account: { loggedIn: false, label: '登录已过期' },
+    state: { claimedToday: false, lastAttempt: { ok: false, outcome: 'needs_login' } },
+  })
+  assert.equal(c.loginText, '登录已过期')
+  assert.equal(c.checkText, '无法签到')
+})
+
+test('索引卡片：账号没这玩法 → 已登录但不用签', () => {
+  const c = cardText({
+    account: { loggedIn: true },
+    state: { claimedToday: false, lastAttempt: { ok: true, outcome: 'no_task' } },
+  })
+  assert.equal(c.loginText, '已登录')
+  assert.equal(c.checkText, '无签到任务')
+})
+
+test('索引卡片：还没到轮次（Qoder 10:00 前）', () => {
+  const c = cardText({
+    account: { loggedIn: true },
+    state: { claimedToday: false, lastAttempt: { ok: false, outcome: 'not_yet' } },
+  })
+  assert.equal(c.checkText, '还没到轮次')
+})
+
+test('索引卡片：已登录但今天没签过 → 今日未签（不是已签）', () => {
+  const c = cardText({
+    account: { loggedIn: true },
+    state: { claimedToday: false, lastAttempt: null },
+  })
+  assert.equal(c.loginText, '已登录')
+  assert.equal(c.checkText, '今日未签')
+})
+
+test('索引卡片：上次真失败 → 说失败，不说未签', () => {
+  const c = cardText({
+    account: { loggedIn: true },
+    state: { claimedToday: false, lastAttempt: { ok: false, outcome: 'CODEARTS_HTTP_ERROR' } },
+  })
+  assert.equal(c.checkText, '上次失败')
+})
+
+test('索引卡片：未登录', () => {
+  const c = cardText({ account: { loggedIn: false }, state: {} })
+  assert.equal(c.loginText, '未登录')
+  assert.equal(c.checkText, '无法签到')
 })

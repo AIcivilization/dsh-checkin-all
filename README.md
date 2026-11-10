@@ -14,16 +14,20 @@
 
 | 服务 | 凭据来源 | 签到单位 | 「今天」按哪算 |
 | --- | --- | --- | --- |
-| MiniMax Code | `~/.minimax/auth/`（OAuth） | 分 | 本机时区 |
+| MiniMax Code | `~/.minimax/auth/`（OAuth） | 分 | **北京时间** |
 | WPS 灵犀 | 灵犀自己的 Cookies（`wps_sid`） | 智点 | **北京时间** |
 | 百度 DuMate | `qianfan-desktop-app/auth.json`（加密 cookie） | 积分 | **北京时间** |
 | AStudio | `~/.acode/acode/userdata/astron-session.json` | 积分 | **北京时间** |
-| Qoder | 个人访问令牌（PAT，面板里填） | 积分 | **北京时间** |
+| Qoder | 本机 Qoder App 登录（自动读），或面板填 PAT | 积分 | **北京时间** |
 | Trae | 本机 Trae App/CLI 登录（自动读） | 积分 | **北京时间** |
-| 豆包 | 登录 Cookie（面板里填，或从本机浏览器读） | 额度 | **北京时间** |
+| 豆包 | 登录 Cookie（面板「配置 Cookie」，或从本机豆包/浏览器读） | 额度 | **北京时间** |
+| 华为 CodeArts | 浏览器登录（点一下授权，自动拿 AK/SK；也可手填） | 积分 | **北京时间** |
+| 腾讯 WorkBuddy | 浏览器登录（点一下授权；也可手贴 token，多账号） | 积分 | **北京时间** |
 
-签到窗口不一样：灵犀、搭子、AStudio、Qoder、Trae、豆包 按北京时间算日期，美西晚上 8 点之后就已经是北京的第二天了。
-插件按各自的规则判断「今天」，互不干扰。
+**全部服务一律按北京时间算「今天」和签到窗口，不跟随本机时区。**
+
+（早期版本里 MiniMax 跟本机时区，结果美西晚上 8 点之后本机还是 4 号、北京已经是 5 号，
+两条口径对不上，会出现重复签和连续天数错乱。现在统一成北京时间，本机在哪都一样。）
 
 ## 它做什么
 
@@ -75,6 +79,7 @@ node bin/dsh-checkin-all.js set lingxi  "<wps_sid>"
 node bin/dsh-checkin-all.js set dumate  "<完整 Cookie 串，含 bce-user-info>"
 node bin/dsh-checkin-all.js set astudio "<accountId>,<token>,<ssoSessionId>"
 node bin/dsh-checkin-all.js set trae    "<Cloud-IDE-JWT token>"
+node bin/dsh-checkin-all.js set codearts "<access_key_id>,<secret_access_key>,<security_token>"
 
 node bin/dsh-checkin-all.js unset lingxi   # 删除某个服务的手动凭据，回退到 App 文件
 ```
@@ -91,6 +96,9 @@ node bin/dsh-checkin-all.js unset lingxi   # 删除某个服务的手动凭据�
 
 `cron` 是静默模式：今天签过了就什么都不做，只在真签的时候输出一行。
 
+> 注意：cron 的时间是**本机时区**，但插件判断「今天」和签到窗口是**北京时间**。
+> 本机在美国时，想在北京时间 09:00 签，cron 要写成本机对应的时刻（美西 = 前一天 17:00）。
+
 ## 在对话里
 
 | 你说 | 会发生什么 |
@@ -102,7 +110,42 @@ node bin/dsh-checkin-all.js unset lingxi   # 删除某个服务的手动凭据�
 
 命令：`/checkin 状态｜签到 [服务]｜时间 09:00｜开启｜关闭｜登录`（`/minimax` 是别名）
 
-服务名：`minimax`（MiniMax Code）/ `lingxi`（WPS 灵犀）/ `dumate`（百度 DuMate）/ `astudio`（AStudio）/ `qoder`（Qoder）/ `trae`（Trae）/ `doubao`（豆包）
+服务名：`minimax`（MiniMax Code）/ `lingxi`（WPS 灵犀）/ `dumate`（百度 DuMate）/ `astudio`（AStudio）/ `qoder`（Qoder）/ `trae`（Trae）/ `doubao`（豆包）/ `codearts`（华为 CodeArts）/ `buddy`（腾讯 WorkBuddy）
+
+## 多账号
+
+**每个服务都能配多个账号**，签到时会逐个签，结果分别汇报。
+
+面板里：切到对应服务 → 「账号」卡片 → 填凭据 → 点「添加账号」。想区分就在「备注名」里写「主号 / 小号」。
+已配的账号列在上面，每个后面有「删除」。
+
+命令行：
+
+```bash
+# 加账号（同一个服务可以加多次）
+node bin/dsh-checkin-all.js set lingxi "<wps_sid>" --name 主号
+node bin/dsh-checkin-all.js set lingxi "<另一个 wps_sid>" --name 小号
+```
+
+存储结构（`~/.dsh/dsh-checkin-all/secrets.json`，0600）：
+
+```json
+{ "checkin": { "manual": {
+  "lingxi": { "accounts": [
+    { "id": "1", "name": "主号", "wps_sid": "..." },
+    { "id": "2", "name": "小号", "wps_sid": "..." }
+  ] }
+} } }
+```
+
+**老的单个凭据会自动迁移**：升级后第一次读取会把扁平结构当成 1 个账号，不会丢数据。
+
+汇总规则：任一账号签上就算 `claimed`，积分累加，连续天数取最大的那个；
+部分账号失败不影响其他账号，消息里会点名是哪个失败了。
+
+支持多账号的：灵犀、DuMate、AStudio、Qoder、Trae、豆包、CodeArts、WorkBuddy。
+**MiniMax 例外**——它的凭据是 App 里的 OAuth 文件（`~/.minimax/auth/`），
+天然只有一份，且 refresh token 一次性，不适合手动塞多份 token。
 
 ## 配置
 
@@ -112,8 +155,7 @@ node bin/dsh-checkin-all.js unset lingxi   # 删除某个服务的手动凭据�
 - id: dsh-checkin-all
   config:
     enabled: true      # 是否自动签到
-    time: '09:00'      # 每天几点签
-    timeZone: ''       # 时区覆盖，空 = 跟随本机（只影响 MiniMax；灵犀固定按北京时间）
+    time: '09:00'      # 每天几点签（北京时间）
     catchUp: true      # 过了时间才开机是否补签
     notify: true       # 签完是否提示
 ```
@@ -260,10 +302,38 @@ POST {openApi}/sash/api/v1/me/campaigns/{id}/claim   幂等领取（重复返回
 ```
 
 - 国内版 `https://openapi.qoder.com.cn`，国际版 `https://openapi.qoder.sh`
-- 凭据：**个人访问令牌（PAT）**，在面板里填，存 `~/.dsh/dsh-checkin-all/secrets.json`（0600）
+- 凭据有两条路，**优先用本机 Qoder App 的登录**（零配置）：
+  1. 本机 Qoder 桌面 App 登录态：`<App Support>/com.qoder.app.stable/auth.v1.dat`
+     （Electron safeStorage，密钥在钥匙串「Qoder App Safe Storage」），
+     解出来直接当 token 用；`authenticationContext` 里是 `openapi.qoder.sh` 就走国际版
+  2. 个人访问令牌（PAT）：面板里填，存 `~/.dsh/dsh-checkin-all/secrets.json`（0600），
+     会先打 `exchange` 接口验真再落盘
 - 「今天」按**北京时间**算
 
-**获取 PAT**：打开 Qoder → 用量面板 / 设置 → 个人访问令牌，复制后粘贴到面板「Qoder 令牌」卡片（点卡片头部的「配置令牌」）。填 PAT、选区域（国内/海外）、可加备注名，点「添加令牌」会自动验证 PAT 是否有效。也支持多个令牌（多账号）。
+#### ⚠️ 自动签到时间会自动对齐到 10:00
+
+Qoder 的每日活动是 **10:00 → 次日 09:59** 一轮。在 10:00 之前看到的还是**上一轮**：
+如果按全局的 09:00 去签，会读到「已领」（其实是昨天那轮的），于是把当天标成已完成，
+10:00 新一轮出来后再也不会重试 —— 这正是以前「手动能签、自动签不上」的原因。
+
+现在两处都改了：
+
+- `PROVIDER_EARLIEST_TIME` 把 qoder 的最早签到时间抬到 **10:00**（你手动设过更早的时间则以你的为准）
+- 「还没到轮次」（`not_yet`）**不占用当天记录**，只做退避重试，到点自然会签上
+
+**获取 PAT**：令牌在 **Qoder 网页版**创建，**不在桌面 App 里**（App 里翻不到，这是最容易卡住的地方）：
+
+1. 浏览器登录 Qoder
+2. 打开 <https://qoder.com/account/integrations>（海外版）或 <https://qoder.com.cn/account/integrations>（国内版）
+3. 点「创建令牌」，复制 —— 以 `pt-` 开头，**只显示一次**
+
+旧版页面可能在「设置 → API 令牌」或「账号 → 集成」下面。
+
+拿到后粘贴到面板「Qoder 令牌」卡片（点卡片头部的「配置令牌」），选区域（国内/海外）、可加备注名，点「添加令牌」——插件会先打 `exchange` 接口验真再落盘。也支持多个令牌（多账号）。
+
+> 注意：dsh-model 的 Qoder 签到**只支持 PAT**，它不会去读 Qoder 桌面 App。
+> 本插件多了一条路：本机 Qoder App 登录着就直接读（见上），不用创建令牌。
+
 
 ### Trae
 
@@ -287,9 +357,116 @@ POST https://www.doubao.com/alice/ug/campaign/v3/detail/        任务面板
 POST https://www.doubao.com/alice/ug/campaign/landing/checkin   领取（幂等，重复返回 idempotent:true）
 ```
 
-- 凭据：豆包登录 Cookie（`doubao.com`），在面板里手动粘贴，或从本机豆包电脑版/Chrome/Edge/Brave 自动读
-- 只支持个人账号：飞书企业账号没有签到任务
+- 凭据：豆包登录 Cookie（`doubao.com`），在面板里手动粘贴，或点「从本机豆包读」（豆包电脑版 / Chrome / Edge / Brave）
 - 「今天」按**北京时间**算
+
+#### ⚠️ 只有个人账号有签到，工作版没有
+
+**豆包工作版（DoubaoWork，`com.work.pc.doubao`）和飞书企业账号没有「每日签到」这个玩法。**
+它们的任务面板长这样：
+
+```
+tasks[].task_kind = chat_activity   ← 全是聊天任务，没有 daily_signin
+milestones[] = 累计 2000 / 5000 点额度里程碑
+progress.total_amount = 0
+```
+
+直接调签到接口，服务端会回：
+
+```json
+{ "code": 710010702, "msg": "系统错误", "data": null }
+```
+
+**注意这个错误码不是登录失效**（失效是 `710012001`）。`710010702` 表示 cookie 是好的，
+但这个账号没有可领的签到活动。插件会识别成 `no_task` 状态并说明原因，不当作故障重试。
+
+判断账号类型：Cookie 里有 `feishu_dpop_keypair` / `has_biz_token` 基本就是工作/企业号，
+换个人豆包账号（[doubao.com](https://www.doubao.com) 网页版登录后的 Cookie）即可。
+
+
+### 华为 CodeArts
+
+华为云 CodeArts 的每日登录积分（`lib/providers/codearts.js`）。四步，全部打同一个网关，
+每个请求都要**华为云 SDK-HMAC-SHA256 签名**：
+
+```
+GET  https://snap-access.cn-north-4.myhuaweicloud.com/snap-manager/v1/statistics/plugin   账户信息
+GET  .../v1/ops/delivery?channel=IDE                                                      活动列表
+POST .../v1/ops/claim   {"campaignId":"1","channel":"IDE"}                                 领取
+POST .../v1/ops/confirm {"campaignId":"1"}                                                 确认
+```
+
+- 凭据：**点面板的「登录」按钮，浏览器授权一次就有了**，不用手抠 AK/SK。
+  也可以手动配 `{ access_key_id, secret_access_key, security_token? }` 或 `set codearts`
+
+#### 浏览器登录怎么走的
+
+和官方 CodeArts 插件同一条链路（`lib/providers/codearts-login.js`）：
+
+1. 本地起回调服务器 `http://127.0.0.1:8791/authentication`（端口占用就换随机的）
+2. 打开 `auth.huaweicloud.com`，带上回调地址和 ticket
+3. 你在浏览器登录并同意授权，华为云把请求转回本地
+4. 用回调里的 secret 去 `snap-manager/v1/login/ticket` 换临时 AK/SK/security_token
+5. 自动写进 `secrets.json`，面板上就变「已登录」
+
+拿到的 `security_token` 是华为云 STS 临时凭据，过期后重新点一次「登录」即可。
+- **不是所有账户都能签**：`is_credit_package=false`（Token 计费账户）直接判为没有这个活动
+- 幂等靠 `claimable` + `status`（`CLAIMED`/`CONFIRMED`/`CONSUMED` 算已领），不会重复 POST
+
+签名有三个坑（实现里都处理了，`test/providers.test.js` 有逐字节比对）：
+
+1. **参与签名的 URI 必须补尾斜杠**：`/v1/ops/claim` 要按 `/v1/ops/claim/` 签，但请求仍打不带斜杠的
+2. `host` 参与签名但**不要手动设** header，交给运行时
+3. claim 的 body 有 `channel`、confirm 的**没有** —— 两个 body 不同，签名必须各算各的
+
+#### 浏览器登录怎么走的
+
+和官方客户端同一条链路（`lib/providers/buddy-login.js`）：
+
+1. `POST /v2/plugin/auth/state?platform=ide` → 拿 `state` 和授权地址
+2. 打开授权页（补 `version` + `loginSessionId`），你在浏览器登录腾讯账号
+3. 轮询 `GET /v2/plugin/auth/token?state=` —— 未确认时服务端回 `code 11217 "login ing..."`
+4. 拿到 token 后查 `GET /v2/plugin/login/account?state=` 补 user_id / enterprise_id
+5. 写进 `secrets.json` 的 `manual.buddy.accounts[]`
+
+两个产品线各自独立：国内版（`copilot.tencent.com`）填 `region: cn`，
+国际版 WorkBuddy（`www.workbuddy.ai`）填 `region: intl`。命令行：
+
+```bash
+node bin/dsh-checkin-all.js login buddy          # 国内版
+node bin/dsh-checkin-all.js login buddy intl     # 国际版
+```
+
+### 腾讯 WorkBuddy
+
+腾讯 WorkBuddy 的每日领取（`lib/providers/buddy.js`）。
+
+> 对外统一叫 **WorkBuddy**。底层有两个产品线，技术标识 `productCode` 分别是
+> `codebuddy`（国内版）和 `workbuddy`（国际版）—— 那是发给服务端的，不能改。
+
+```
+POST {endpoint}/v2/billing/meter/checkin-activity-status   活动状态（active / today_checked_in / streak）
+POST {endpoint}/v2/billing/meter/daily-checkin             领取
+POST {endpoint}/v2/billing/meter/get-user-resource         余额
+```
+
+- 国内版 `https://copilot.tencent.com`（有签到）；国际版 WorkBuddy `https://www.workbuddy.ai`
+  **只有模型接入、没有签到**（上游能力表就是空的）
+- 认证是一串头，少一个服务端只回 401 HTML（很难看出原因）：
+  ```
+  Authorization: Bearer <access_token>
+  X-Domain: copilot.tencent.com
+  X-Product: SaaS
+  X-Product-Code: codebuddy
+  X-User-Id / X-Enterprise-Id / X-Tenant-Id   有就带
+  User-Agent: CodeBuddyIDE/1.106.1
+  ```
+- 错误码：`10001`/`1001` = 今天已领；`1002` = 无资格；`1003` = 活动结束（后两个按 `no_task` 处理，不当故障重试）
+- 支持多个 token（多账号），存 `manual.buddy.accounts[]`
+
+> **没做的渠道**：dsh-free-model 里另有 LobsterAI、Loomy、ZCode、Cline、Raccoon、Gemini，
+> 但 Cline / Gemini / Raccoon / WorkBuddy 国际版**本身没有每日领取**（只有余额或额度查询），
+> 另外三个需要另外的账号体系（有道 / 讯飞微信 / 智谱），本机没有登录态，没做。
 
 ## 隐私
 
@@ -329,7 +506,7 @@ ssh vps 'bash /opt/dsh-checkin-all/scripts/deploy-vps.sh /opt/dsh-checkin-all'
 | `LINGXI_DATA_DIR` | 灵犀数据目录（默认 macOS 的 `~/Library/Application Support/WPS 灵犀`） |
 | `DUMATE_DATA_DIR` | DuMate 数据目录（默认 `~/Library/Application Support/qianfan-desktop-app`） |
 | `ASTUDIO_DATA_DIR` | AStudio 用户数据目录（默认 `~/.acode/acode/userdata`） |
-| `ASTUDIO_VERSION` | AStudio 版本号（默认 `3.5.5`，用于上游 `studioVersion` 头） |
+| `ASTUDIO_VERSION` | AStudio 版本号（默认自动读 App 的版本，读不到用 `3.5.5`） |
 | `DSH_CHECKIN_ALL_READONLY` | `1` = 不刷新 refresh token |
 | `DSH_CHECKIN_ALL_HOME` | 插件自己的状态目录（默认 `~/.dsh/dsh-checkin-all`） |
 
