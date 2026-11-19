@@ -8,6 +8,7 @@ import {
   beijingDayKey, normalizeLingxiPanel, describeLingxiPanel, pickDailyTask, LINGXI_TZ,
 } from '../lib/providers/lingxi.js'
 import { createProviders } from '../lib/providers/index.js'
+import { qoderLoginDirs } from '../lib/providers/qoder.js'
 import { providerConfig, recordAttempt, loadState, claimedToday, DEFAULT_CONFIG } from '../lib/store.js'
 
 const lingxiTask = {
@@ -1120,4 +1121,28 @@ test('自定义服务：凭据目录权限 600', async () => {
   await upsertCustomService({ id: 'permSite', checkin: { url: 'https://a.com/x' } }, env)
   const st = await stat(join2(home, 'custom-services.json'))
   assert.equal((st.mode & 0o777).toString(8), '600')
+})
+
+// ── Qoder 国内版（CN）识别 ─────────────────────────────────────────────
+// 背景：Qoder 有国内版（com.qodercn.app.stable / 钥匙串「Qoder CN App Safe Storage」）
+// 与国际版（com.qoder.app.stable / 钥匙串「Qoder App Safe Storage」）两套发行版。
+// 只认国际版目录时，装了 CN 版的 macOS 用户会被误判成「未登录」。
+
+test('Qoder 目录探测：国内版优先，国际版兜底', () => {
+  const dirs = qoderLoginDirs({ HOME: '/Users/demo' }, 'darwin')
+  assert.equal(dirs.length, 2)
+  assert.equal(dirs[0].dir, '/Users/demo/Library/Application Support/com.qodercn.app.stable')
+  assert.equal(dirs[1].dir, '/Users/demo/Library/Application Support/com.qoder.app.stable')
+})
+
+test('Qoder 目录探测：国内版先试「Qoder CN」钥匙串', () => {
+  const dirs = qoderLoginDirs({ HOME: '/Users/demo' }, 'darwin')
+  assert.deepEqual(dirs[0].keychainNames, ['Qoder CN', 'Qoder'])
+  assert.deepEqual(dirs[1].keychainNames, ['Qoder'])
+})
+
+test('Qoder 目录探测：Windows 也覆盖国内版目录', () => {
+  const dirs = qoderLoginDirs({ APPDATA: 'C:\\Users\\demo\\AppData\\Roaming' }, 'win32')
+  assert.equal(dirs[0].dir.endsWith('com.qodercn.app.stable'), true)
+  assert.equal(dirs[1].dir.endsWith('com.qoder.app.stable'), true)
 })
