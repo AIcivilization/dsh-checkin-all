@@ -5,12 +5,12 @@
 [![license](https://img.shields.io/npm/l/dsh-checkin-all?style=flat-square&color=green)](./LICENSE)
 [![node](https://img.shields.io/node/v/dsh-checkin-all?style=flat-square&logo=node.js)](https://nodejs.org)
 [![dsh](https://img.shields.io/badge/dsh-%E2%89%A50.2.0-4B32C3?style=flat-square)](https://github.com/deepseek-ai/dsh)
-[![tests](https://img.shields.io/badge/tests-124%20passing-brightgreen?style=flat-square)](./test)
-[![services](https://img.shields.io/badge/%E5%86%85%E7%BD%AE%E6%9C%8D%E5%8A%A1-9-2f6bff?style=flat-square)](#支持的服务)
+[![tests](https://img.shields.io/badge/tests-183%20passing-brightgreen?style=flat-square)](./test)
+[![services](https://img.shields.io/badge/%E5%86%85%E7%BD%AE%E6%9C%8D%E5%8A%A1-11-2f6bff?style=flat-square)](#支持的服务)
 
 **签到 / 自动签到 / 每日签到 / 打卡 / 领积分 / 多账号 / DIY 自定义签到 / DeepSeek Harness 插件**
 
-每天自动给 **MiniMax Code**、**WPS 灵犀**、**百度 DuMate（搭子）**、**AStudio（星火）**、**Qoder**、**Trae**、**豆包**、**华为 CodeArts**、**腾讯 WorkBuddy** 签到领积分。
+每天自动给 **MiniMax Code**、**WPS 灵犀**、**百度 DuMate（搭子）**、**AStudio（星火）**、**Qoder**、**Trae**、**豆包**、**华为 CodeArts**、**腾讯 WorkBuddy**、**商汤小浣熊**、**天翼 AI（TeleAgent）** 签到领积分。
 
 **没在列表里的服务，可以自己 DIY 签到**——面板点「＋ 添加签到服务」，让 DSH 的 AI 帮你查接口，或直接贴一份 JSON，导入就变成新卡片。
 
@@ -24,7 +24,7 @@
 
 ## 三个重点能力
 
-### 1. 内置 9 个服务，开箱即用
+### 1. 内置 11 个服务，开箱即用
 
 装上就能签，凭据自动从本机 App 里读，不用手动配。详见下方「支持的服务」。
 
@@ -99,6 +99,8 @@ node bin/dsh-checkin-all.js set lingxi "<sid>" --name 小号
 | 豆包 | 登录 Cookie（面板「配置 Cookie」，或从本机豆包/浏览器读） | 额度 | ✅ | **北京时间** |
 | 华为 CodeArts | 浏览器登录（点一下授权，自动拿 AK/SK；也可手填） | 积分 | ✅ | **北京时间** |
 | 腾讯 WorkBuddy | 浏览器登录（点一下授权；也可手贴 token） | 积分 | ✅ | **北京时间** |
+| 商汤小浣熊 | 点「登录」弹一个独立浏览器窗口，自己登录即自动取 token（也可手贴 Cookie） | 积分 | ✅ | **北京时间** |
+| 天翼 AI（TeleAgent） | 点「登录」弹一个独立浏览器窗口，自己登录即自动取 token（也可手贴 operationToken） | 积分 | ✅ | **北京时间** |
 | **自定义服务** | 面板「添加签到服务」，AI 生成或自己贴 JSON | 自定义 | ✅ | **北京时间** |
 
 **全部服务一律按北京时间算「今天」和签到窗口，不跟随本机时区。**
@@ -191,11 +193,11 @@ node bin/dsh-checkin-all.js unset lingxi   # 删除某个服务的手动凭据�
 
 命令：`/checkin 状态｜签到 [服务]｜时间 09:00｜开启｜关闭｜登录`（`/minimax` 是别名）
 
-服务名：`minimax`（MiniMax Code）/ `lingxi`（WPS 灵犀）/ `dumate`（百度 DuMate）/ `astudio`（AStudio）/ `qoder`（Qoder）/ `trae`（Trae）/ `doubao`（豆包）/ `codearts`（华为 CodeArts）/ `buddy`（腾讯 WorkBuddy）
+服务名：`minimax`（MiniMax Code）/ `lingxi`（WPS 灵犀）/ `dumate`（百度 DuMate）/ `astudio`（AStudio）/ `qoder`（Qoder）/ `trae`（Trae）/ `doubao`（豆包）/ `codearts`（华为 CodeArts）/ `buddy`（腾讯 WorkBuddy）/ `xiaohuanxiong`（商汤小浣熊）/ `teleagent`（天翼 AI）
 
 ## 加新的签到服务（不写代码）
 
-内置 9 个服务，但外面还有一堆能签到的站点。面板底部有个 **「＋ 添加签到服务」**，
+内置 11 个服务，但外面还有一堆能签到的站点。面板底部有个 **「＋ 添加签到服务」**，
 点开有两条路：
 
 ### 方式一：让 DSH 的 AI 帮你做（推荐）
@@ -288,7 +290,7 @@ node bin/dsh-checkin-all.js set lingxi "<另一个 wps_sid>" --name 小号
 汇总规则：任一账号签上就算 `claimed`，积分累加，连续天数取最大的那个；
 部分账号失败不影响其他账号，消息里会点名是哪个失败了。
 
-支持多账号的：灵犀、DuMate、AStudio、Qoder、Trae、豆包、CodeArts、WorkBuddy。
+支持多账号的：灵犀、DuMate、AStudio、Qoder、Trae、豆包、CodeArts、WorkBuddy、小浣熊、TeleAgent。
 **MiniMax 例外**——它的凭据是 App 里的 OAuth 文件（`~/.minimax/auth/`），
 天然只有一份，且 refresh token 一次性，不适合手动塞多份 token。
 
@@ -609,9 +611,106 @@ POST {endpoint}/v2/billing/meter/get-user-resource         余额
 - 错误码：`10001`/`1001` = 今天已领；`1002` = 无资格；`1003` = 活动结束（后两个按 `no_task` 处理，不当故障重试）
 - 支持多个 token（多账号），存 `manual.buddy.accounts[]`
 
-> **没做的渠道**：dsh-free-model 里另有 LobsterAI、Loomy、ZCode、Cline、Raccoon、Gemini，
-> 但 Cline / Gemini / Raccoon / WorkBuddy 国际版**本身没有每日领取**（只有余额或额度查询），
+> **没做的渠道**：dsh-free-model 里另有 LobsterAI、Loomy、ZCode、Cline、Gemini，
+> 但 Cline / Gemini / WorkBuddy 国际版**本身没有每日领取**（只有余额或额度查询），
 > 另外三个需要另外的账号体系（有道 / 讯飞微信 / 智谱），本机没有登录态，没做。
+> （Raccoon 就是下面的「商汤小浣熊」，已经做了。）
+
+### 商汤小浣熊
+
+商汤「小浣熊」（[xiaohuanxiong.com](https://xiaohuanxiong.com)）的每日积分（`lib/providers/xiaohuanxiong.js`）。
+
+**它没有「点一下签到」的按钮**——每日积分是服务端发的：
+
+- 每天 **00:00（北京时间）** 自动发当日额度，默认当天 24:00 清零
+- **当天登录一次**，有效期就从「当天 24:00」延长到 **7 天**（这就是「打卡」的全部意义）
+- 免费版 300 积分/日；个人升级版 500/日 + 10000/月；企业版 1000/日/人 + 30000/月
+
+所以插件的「签到」= 用你的登录态读一遍账户，确认今天的额度到账了、顺手发一次心跳续期：
+
+```
+GET  /api/web/points/v1/balance                                余额（available_points / user_category）
+GET  /api/web/points/v2/bills?paging.limit=20&type=all         积分流水（biz_type=daily_grant / daily_expire）
+POST /api/web/auth/v1/devices_current_heartbeat                登录心跳（当日登录 → 有效期延长到 7 天）
+```
+
+判定：流水里今天有 `biz_type=daily_grant` → `already_claimed`（已到账，不动）；
+没有 → 发心跳 → 再查一次流水，到账了就 `claimed`，还没到就 `not_yet`（服务端延迟，稍后自动重试）。
+
+**登录：点卡片上的「登录」，弹一个窗口，你自己登（`lib/providers/xiaohuanxiong-login.js`）**
+
+不用复制粘贴 Cookie。点「登录」之后插件会：
+
+1. 用**独立 profile** 起一个真的 Chrome 窗口（`~/.dsh/dsh-checkin-all/browser/xiaohuanxiong`），
+   直接打开登录页 <https://xiaohuanxiong.com/login?product_code=work&redirect_url=%2Fwork%2Fhome>
+   （手机号 / 微信扫码都在这个页面上，登完自动回办公端）
+2. 你在那个窗口里照常登录 —— **账号密码只输给官网，插件全程不碰**
+3. 插件通过 CDP 读那个窗口里 `xiaohuanxiong.com` 域的 cookie，挑出 `xhx_token` /
+   `raccoon_token`，先调一次余额接口**验证真的能用**（游客 token 换不出余额，会被判为还没登录）
+4. 验证通过 → 关窗口、把凭据写进 `secrets.json`、顺手把昵称记成账号名
+
+窗口默认等 5 分钟；profile 会留着，下次点「登录」通常已经是登录态，一秒就取到 token。
+同一个号重复登录会覆盖原来那条账号记录，不会越登越多；**要换另一个号**，先删掉
+`~/.dsh/dsh-checkin-all/browser/xiaohuanxiong` 再点「登录」（新 profile 是干净的未登录态）。
+
+也可以手填（不想开窗口的话）：浏览器打开 xiaohuanxiong.com 登录 → 开发者工具 → Application →
+Cookies → 复制 `xhx_token` 的值，粘到面板「配置凭据」。整条 Cookie 或裸 Bearer token 都认；
+旧版的 `<前缀>raccoon_token` 也认。
+
+```bash
+dsh-checkin-all set xiaohuanxiong xhx_token的值
+dsh-checkin-all set xiaohuanxiong "整条 Cookie 串" --name 主号
+```
+
+> 为什么是「弹窗口」而不是直接读你日常浏览器的 Cookie：macOS 上读 Chrome/Edge 的 Cookies 库要过
+> 沙箱和钥匙串两道（`Operation not permitted`），读不了；而且那样会把用户的浏览数据一起碰。
+> 独立 profile 只装小浣熊这一件事，干净、可复用、还能随时删掉。
+> 只在装了 Chrome / Edge / Brave / Chromium 的机器上可用；没有浏览器时退回手填。
+> token 失效时返回 `needs_login`，面板会提示重新贴一次，不会当故障反复重试。
+
+### 天翼 AI（TeleAgent）
+
+中国电信「天翼 AI」（[agent.teleai.com.cn/teleagent](https://agent.teleai.com.cn/teleagent)）的每日积分
+（`lib/providers/teleagent.js`）。
+
+它的签到在「积分福利社」里：服务端每天挂一条活动，用户点「立即领取」才到账。
+插件的流程和网页端一模一样：
+
+```
+GET  /user/portal/companyStore/userCenter                 账户（current_points_balance 余额）
+GET  /user/portal/companyStore/v3/checkDayTask?theme=light 当日活动 activity_data[]
+GET  <activity.jump_url>                                   领取（jump_url 就是领取地址）
+GET  /user/portal/companyStore/checkTask                   首登礼 / 月度礼
+```
+
+- 可领判定：`action_status` ∈ `incomplete` / `not_joined` / `fixed`（和前端同一个集合）
+- 领取地址：直接取 `jump_url`，把 `/superCowork/sapi` 前缀去掉后 GET（前端就是这么干的）
+- `action_type === 'web'` 的活动只是跳转（不产生领取），跳过
+- 接口前缀两套都试：先 `/meter/super-agent/user/portal`（web 门户），不通再退回
+  `/superCowork/sapi/user/portal`（桌面端）
+
+判定：有可领活动 → 逐个领 → 重读一次状态 → `claimed`（带本次拿到的积分）；
+都已经领完 → `already_claimed`；有活动但服务端没给结果 → `not_yet`（稍后自动重试）。
+
+**登录：和小浣熊一样，点「登录」弹窗口，你自己登**（`lib/providers/teleagent-login.js`）
+
+1. 用独立 profile 起一个 Chrome（`~/.dsh/dsh-checkin-all/browser/teleagent`），打开
+   <https://agent.teleai.com.cn/meter/teleagent-login/login>
+2. 你在窗口里照常登录（手机号 / 扫码都行，账号密码只输给官网，插件不碰）
+3. 插件通过 CDP 读那个窗口 `teleai.com.cn` 域的 cookie，挑出 `operationToken`
+   （读不到就读 localStorage 的 `user_token` / `sso_token` / `console_token`），
+   先调一次 userCenter **验证真的能用**，通过才写进 `secrets.json`
+
+也可以手填：浏览器登录后开发者工具 → Application → Cookies 复制 `operationToken`，
+粘到面板「配置凭据」；整条 Cookie 或裸 token 都认。
+
+```bash
+dsh-checkin-all set teleagent operationToken的值
+dsh-checkin-all set teleagent "整条 Cookie 串" --name 主号
+```
+
+> token 失效（HTTP 401 / `code:"4001"`）时返回 `needs_login`，面板提示重新登一次，
+> 不会当故障反复重试。要换另一个号，先删掉 `~/.dsh/dsh-checkin-all/browser/teleagent` 再点「登录」。
 
 ## 隐私
 
@@ -674,7 +773,8 @@ node --test "test/*.test.js"
 
 **服务**
 `MiniMax Code` `WPS 灵犀` `百度 DuMate` `搭子` `AStudio` `星火` `Qoder` `Trae` `豆包`
-`华为 CodeArts` `华为云` `腾讯 WorkBuddy` `CodeBuddy`
+`华为 CodeArts` `华为云` `腾讯 WorkBuddy` `CodeBuddy` `商汤小浣熊` `小浣熊` `xiaohuanxiong`
+`天翼 AI` `TeleAgent` `teleagent` `agent.teleai.com.cn`
 
 **技术**
 `DeepSeek Harness` `dsh` `dsh-plugin` `cordis` `插件` `面板` `dashboard`

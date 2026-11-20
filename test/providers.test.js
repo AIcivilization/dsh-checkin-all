@@ -117,11 +117,11 @@ test('灵犀从任务列表里挑出签到任务', () => {
   assert.equal(pickDailyTask(null), null)
 })
 
-test('注册表里有七个服务，元信息齐全', () => {
+test('注册表里有十一个服务，元信息齐全', () => {
   const providers = createProviders({ log: () => {} })
-  assert.deepEqual(providers.ids(), ['minimax', 'lingxi', 'dumate', 'astudio', 'qoder', 'trae', 'doubao', 'codearts', 'buddy'])
+  assert.deepEqual(providers.ids(), ['minimax', 'lingxi', 'dumate', 'astudio', 'qoder', 'trae', 'doubao', 'codearts', 'buddy', 'xiaohuanxiong', 'teleagent'])
   const meta = providers.meta()
-  assert.equal(meta.length, 9)
+  assert.equal(meta.length, 11)
   const lingxi = meta.find(m => m.id === 'lingxi')
   assert.equal(lingxi.name, 'WPS 灵犀')
   assert.equal(lingxi.timeZoneMode, 'fixed')
@@ -1088,7 +1088,7 @@ test('自定义服务：导入后出现在卡片列表里', async () => {
 
   const providers = await createProvidersAsync({ log: () => {}, env })
   const meta = providers.meta()
-  assert.equal(meta.length, 10, '9 内置 + 1 自定义')
+  assert.equal(meta.length, 12, '11 内置 + 1 自定义')
   const card = meta.find(m => m.id === 'demoSite')
   assert.ok(card, '自定义卡片要出现')
   assert.equal(card.short, '演示')

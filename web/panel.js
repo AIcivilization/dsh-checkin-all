@@ -115,14 +115,14 @@ function cardHTML(p, { dragging = false } = {}) {
   const needsLogin = lastOutcome === 'needs_login'
   const loggedIn = Boolean(p.account && p.account.loggedIn)
 
-  const loginMark = loggedIn
+  // 凭据文件还在、但服务端已经拒了（needs_login）：卡片要显示「已过期」，不能还写「已登录」
+  const expired = needsLogin || (p.account && p.account.label === '登录已过期')
+  const loginMark = loggedIn && !expired
     ? '<span class="cmark ok" aria-hidden="true">✓</span>'
     : '<span class="cmark bad" aria-hidden="true">✗</span>'
-  const loginText = loggedIn
-    ? '已登录'
-    : needsLogin ? '已过期'
-      : (p.account && p.account.label === '登录已过期') ? '已过期'
-        : '未登录'
+  const loginText = expired
+    ? '已过期'
+    : loggedIn ? '已登录' : '未登录'
 
   let checkMark
   let checkText
@@ -340,20 +340,24 @@ function renderDetail() {
   const account = p.account || {}
   const minutes = account.loggedIn ? Math.round((account.expiresInSec || 0) / 60) : 0
 
-  const accountValue = account.loggedIn
-    ? `${account.label}${minutes > 0 ? ` · ${minutes} 分钟后过期` : account.detail ? ` · ${account.detail}` : ''}`
-    : (account.label || '未登录') + (account.detail ? `（${account.detail}）` : '')
+  // 凭据在、但服务端拒了（上次结果是 needs_login）：显示「已过期」并提示重新贴
+  const expiredNow = Boolean(st.lastAttempt && st.lastAttempt.outcome === 'needs_login')
+  const accountValue = expiredNow
+    ? `登录已过期 · ${st.lastAttempt.message || '重新配置凭据'}`
+    : account.loggedIn
+      ? `${account.label}${minutes > 0 ? ` · ${minutes} 分钟后过期` : account.detail ? ` · ${account.detail}` : ''}`
+      : (account.label || '未登录') + (account.detail ? `（${account.detail}）` : '')
 
   const last = st.lastAttempt
   const lastText = last
     ? `${new Date(last.at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} · ${last.message || last.outcome}`
     : ''
 
-  const canLogin = p.id === 'minimax' || p.id === 'codearts' || p.id === 'buddy'
+  const canLogin = ['minimax', 'codearts', 'buddy', 'xiaohuanxiong', 'teleagent'].includes(p.id)
   // 浏览器授权式登录（没有设备码，弹窗里只显示「等待浏览器授权」）
-  const browserLogin = p.id === 'codearts' || p.id === 'buddy'
+  const browserLogin = p.id === 'codearts' || p.id === 'buddy' || WINDOW_LOGIN_IDS.includes(p.id)
   // 支持手动配置凭据的服务
-  const canManual = ['lingxi', 'dumate', 'astudio', 'trae', 'codearts'].includes(p.id)
+  const canManual = ['lingxi', 'dumate', 'astudio', 'trae', 'codearts', 'xiaohuanxiong', 'teleagent'].includes(p.id)
   const isDoubao = p.id === 'doubao'
   const isBuddy = p.id === 'buddy'
   const isQoder = p.id === 'qoder'
@@ -363,6 +367,8 @@ function renderDetail() {
     astudio: 'accountId,token,ssoSessionId（逗号分隔）',
     trae: 'Cloud-IDE-JWT token',
     codearts: '华为云 AK/SK：access_key_id,secret_access_key[,security_token]（逗号分隔）',
+    xiaohuanxiong: 'xhx_token 的值，或整条 Cookie（不想手填就点上面的「登录」，弹窗口自己登）',
+    teleagent: 'operationToken 的值，或整条 Cookie（不想手填就点上面的「登录」，弹窗口自己登）',
   }[p.id]
 
   box.innerHTML = `
@@ -370,7 +376,7 @@ function renderDetail() {
       <div class="card-head">
         <h2>${esc(p.name)}</h2>
         <div class="head-actions">
-          ${canLogin && (!account.loggedIn || p.id === 'buddy') ? '<button class="btn tiny" id="btn-login">登录</button>' : ''}
+          ${canLogin && (!account.loggedIn || expiredNow || p.id === 'buddy' || WINDOW_LOGIN_IDS.includes(p.id)) ? '<button class="btn tiny" id="btn-login">登录</button>' : ''}
           ${canManual ? '<button class="btn tiny" id="btn-cred">配置凭据</button>' : ''}
           ${isQoder ? '<button class="btn tiny" id="btn-qoder">配置令牌</button>' : ''}
           ${isDoubao ? '<button class="btn tiny" id="btn-doubao">配置 Cookie</button>' : ''}
@@ -379,7 +385,7 @@ function renderDetail() {
         </div>
       </div>
       <div class="row"><span class="label">登录状态</span>
-        <span class="value ${account.loggedIn ? 'ok' : 'bad'}">${esc(accountValue)}</span></div>
+        <span class="value ${account.loggedIn && !expiredNow ? 'ok' : 'bad'}">${esc(accountValue)}</span></div>
       <div class="row"><span class="label">自动签到</span>
         <span class="value ${p.config && p.config.enabled ? '' : 'warn'}">${
           p.config && p.config.enabled
@@ -834,6 +840,20 @@ const CRED_FIELDS = {
     return { access_key_id, secret_access_key, ...(security_token ? { security_token } : {}) }
   },
   doubao: (v) => ({ cookie: v }),
+  // 小浣熊：整条 Cookie（含 =）就存 cookie，否则当成裸 token
+  xiaohuanxiong: (v) => {
+    const text = String(v || '').trim().replace(/^Bearer\s+/i, '')
+    if (!text) return { error: '请粘贴 xhx_token 或整条 Cookie' }
+    if (text.includes('=')) return { cookie: text }
+    return { cookie: `xhx_token=${text}`, token: text }
+  },
+  // TeleAgent：整条 Cookie（含 =）就存 cookie，否则当成裸 operationToken
+  teleagent: (v) => {
+    const text = String(v || '').trim().replace(/^Bearer\s+/i, '')
+    if (!text) return { error: '请粘贴 operationToken 或整条 Cookie' }
+    if (text.includes('=')) return { cookie: text }
+    return { cookie: `operationToken=${text}`, token: text }
+  },
 }
 
 /** 加载账号列表（多账号） */
@@ -944,10 +964,12 @@ function renderWeek(panel) {
   if (isDaily) {
     const day = panel.days[0]
     const done = day.status === 3
+    // tag 可以由 provider 自己给（有的服务是「已领」有的服务是「已到账」）
+    const tag = day.tag || (done ? '已到账' : '可领取')
     box.innerHTML = `<div class="day ${done ? 'claimed' : 'claimable'} today">
       <div class="no">今天</div>
       <div class="pts">+${day.points}</div>
-      <div class="tag">${done ? '已到账' : '可领取'}</div>
+      <div class="tag">${esc(tag)}</div>
     </div>`
   } else {
     box.innerHTML = panel.days.map((day) => {
@@ -966,9 +988,13 @@ function renderWeek(panel) {
   if (!note) return
   const parts = []
   if (isDaily) {
-    parts.push(panel.today.status === 3
-      ? `今天已自动到账 +${panel.today.points} 积分`
-      : `今天可领取 +${panel.today.points} 积分`)
+    // provider 给了自己的说法就用它（TeleAgent 是「点一下才领」，不是自动到账）
+    if (panel.noteText) parts.push(panel.noteText)
+    else {
+      parts.push(panel.today.status === 3
+        ? `今天已自动到账 +${panel.today.points} 积分`
+        : `今天可领取 +${panel.today.points} 积分`)
+    }
   } else if (panel.today) {
     parts.push(panel.today.status === 3
       ? `今天（第 ${panel.today.dayNo} 天）已签，+${panel.today.points + panel.today.bonusPoints}`
@@ -1146,11 +1172,19 @@ async function saveProviderConfig(id) {
   }
 }
 
-/* ── 登录（只有 MiniMax 支持设备码） ── */
+/* ── 登录（设备码 / 浏览器授权 / 弹独立窗口自己登） ── */
+
+// 这两个服务的登录方式是「插件开一个专用 Chrome 窗口，用户自己登，我们从窗口里取 cookie」
+const WINDOW_LOGIN_IDS = ['xiaohuanxiong', 'teleagent']
+const WINDOW_LOGIN_LABEL = { xiaohuanxiong: '商汤小浣熊', teleagent: 'TeleAgent' }
 
 let loginPoll = 0
+// 正在登录的是哪个服务：关闭弹窗时要按它去取消，不能用 CURRENT
+// （CURRENT 是「详情页在看哪个」，两者不一定一致）
+let loginTarget = ''
 async function startLogin(id, opts = {}) {
   hideBanner()
+  loginTarget = id
   try {
     // WorkBuddy 要带 region（国内版 / 国际版）
     const region = id === 'buddy' ? (($('#buddy-region') && $('#buddy-region').value) || 'cn') : undefined
@@ -1170,28 +1204,86 @@ async function startLogin(id, opts = {}) {
     if (copyBtn) copyBtn.style.display = isBrowserLogin ? 'none' : ''
     $('#login-code').textContent = info.userCode || ''
     $('#login-link').href = info.verificationUriComplete || info.verificationUri
-    $('#login-link').textContent = isBrowserLogin ? '打开华为云登录页 ↗' : (info.verificationUriComplete || info.verificationUri)
+    $('#login-link').textContent = !isBrowserLogin
+      ? (info.verificationUriComplete || info.verificationUri)
+      : (id === 'buddy' ? '打开 WorkBuddy 登录页 ↗' : '打开华为云登录页 ↗')
+    // 独立窗口登录走的是插件自己开的那个窗口：给个官网链接反而误导（那边登录我们读不到 cookie）
+    const isWindowLogin = WINDOW_LOGIN_IDS.includes(id)
+    $('#login-link').style.display = isWindowLogin ? 'none' : ''
     if (isBrowserLogin) {
       const mins = Math.round((info.expiresInSec || 180) / 60)
-      $('#login-hint').textContent = info.opened
-        ? `已在浏览器打开华为云登录页。在那里登录并同意授权，这个窗口会自动完成（${mins} 分钟内有效）。`
-        : `浏览器没自动打开的话，点下面的链接登录并授权（${mins} 分钟内有效）。`
-      $('#login-status').textContent = '等待浏览器授权…'
+      if (isWindowLogin) {
+        // 「独立窗口登录」：插件开一个专用 Chrome 窗口，用户自己登，登完自动取 token
+        $('#login-hint').textContent =
+          `已弹出一个独立的 ${WINDOW_LOGIN_LABEL[id] || ''} 登录窗口，账号密码只输给官网，插件不碰。`
+          + `登录成功后窗口会自动关掉、凭据自动保存（${mins} 分钟内有效）。`
+        $('#login-status').textContent = '等待你在那个窗口里登录…'
+      } else {
+        const site = id === 'buddy' ? 'WorkBuddy 登录页' : '华为云登录页'
+        $('#login-hint').textContent = info.opened
+          ? `已在浏览器打开${site}。在那里登录并同意授权，这个窗口会自动完成（${mins} 分钟内有效）。`
+          : `浏览器没自动打开的话，点下面的链接登录并授权（${mins} 分钟内有效）。`
+        $('#login-status').textContent = '等待浏览器授权…'
+      }
     } else {
       $('#login-hint').textContent = '在浏览器里打开下面的地址，输入设备码确认一次即可（和 App 里登录是同一个流程）。'
       $('#login-status').textContent = `等待确认…（${Math.round(info.expiresInSec / 60)} 分钟内有效）`
     }
 
     clearInterval(loginPoll)
+    if (isBrowserLogin && isWindowLogin) {
+      // 窗口登录：窗口开着，用户在里头自己登。这里**轮询**（poll=1），
+      // 每 2 秒问一次「好了没」，好了就收工；太长的单次请求会被服务端掐断。
+      let ticks = 0
+      const tick = async () => {
+        ticks += 1
+        // 让用户看到「还在等」是有进展的，不是卡住了
+        if (ticks > 1 && $('#login-status').textContent.startsWith('等待')) {
+          $('#login-status').textContent = `等待你在那个窗口里登录…（已等 ${ticks * 2} 秒）`
+        }
+        try {
+          const r = await api(`/login/wait?id=${encodeURIComponent(id)}&poll=1`, { method: 'POST' })
+          if (r.ok) {
+            clearInterval(loginPoll)
+            loginPoll = 0
+            $('#login').classList.add('hidden')
+            banner(`${WINDOW_LOGIN_LABEL[id] || ''} 登录成功${r.account ? `（${r.account}）` : ''}，凭据已保存`, 'ok')
+            await refresh()
+          } else if (!r.pending) {
+            clearInterval(loginPoll)
+            loginPoll = 0
+            if (r.code === 'XHX_WINDOW_CLOSED' || r.code === 'TA_WINDOW_CLOSED') {
+              $('#login-status').textContent = '登录窗口被关掉了。要登录就再点一次卡片上的「登录」'
+              $('#login-hint').textContent = '没登完也不要紧，凭据没保存，不会记成已登录。'
+            } else if (r.code === 'XHX_NO_BROWSER' || r.code === 'TA_NO_BROWSER') {
+              $('#login-status').textContent = '本机没找到 Chrome / Edge'
+              $('#login-hint').textContent = '装一个 Chrome 或 Edge 就能点「登录」弹窗口；也可以「配置凭据」直接粘 Cookie。'
+            } else {
+              $('#login-status').textContent = r.message || '登录失败'
+            }
+          }
+        } catch (e) {
+          clearInterval(loginPoll)
+          loginPoll = 0
+          $('#login-status').textContent = `登录失败：${e.message}`
+        }
+      }
+      loginPoll = setInterval(tick, 2000)
+      // 别等 2 秒才有第一次反馈
+      void tick()
+      return
+    }
     if (isBrowserLogin) {
-      // 浏览器授权式：/login/wait 是一次性的长请求（服务端等到回调才返回），
-      // 所以只发一次，不要每 3 秒重发——否则会在服务端堆出一串等待。
+      // 浏览器授权式（CodeArts / WorkBuddy）：/login/wait 是一次性的长请求
+      // （服务端等到回调才返回），所以只发一次，不要每 3 秒重发——
+      // 否则会在服务端堆出一串等待。
       $('#login-status').textContent = '等待浏览器授权…'
       try {
         const r = await api(`/login/wait?id=${encodeURIComponent(id)}${qs}`, { method: 'POST' })
         if (r.ok) {
           $('#login').classList.add('hidden')
-          banner(`${id === 'buddy' ? 'WorkBuddy' : 'CodeArts'} 登录成功，凭据已保存`, 'ok')
+          const who = id === 'buddy' ? 'WorkBuddy' : (id === 'codearts' ? 'CodeArts' : (WINDOW_LOGIN_LABEL[id] || '服务'))
+          banner(`${who} 登录成功，凭据已保存`, 'ok')
           await refresh()
         } else {
           $('#login-status').textContent = r.message || '登录失败'
@@ -1222,7 +1314,9 @@ async function startLogin(id, opts = {}) {
 function closeLogin() {
   clearInterval(loginPoll)
   $('#login').classList.add('hidden')
-  void api(`/login/cancel?id=${encodeURIComponent(CURRENT || 'minimax')}`, { method: 'POST' }).catch(() => {})
+  const target = loginTarget || CURRENT || 'minimax'
+  loginTarget = ''
+  void api(`/login/cancel?id=${encodeURIComponent(target)}`, { method: 'POST' }).catch(() => {})
 }
 
 /* ── 绑定 ── */

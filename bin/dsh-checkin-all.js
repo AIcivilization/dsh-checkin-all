@@ -3,12 +3,12 @@
 //
 //   dsh-checkin-all status              所有服务：登录状态 + 本周签到表 + 连续天数
 //   dsh-checkin-all checkin [服务]      立刻签到（--dry 只看不领）；不指定服务就全签
-//   dsh-checkin-all login [服务]        登录（minimax 设备码 / codearts、buddy 浏览器授权）
+//   dsh-checkin-all login [服务]        登录（minimax 设备码 / codearts、buddy 浏览器授权 / xiaohuanxiong、teleagent 弹窗口自登）
 //   dsh-checkin-all time 08:30          改自动签到时间
 //   dsh-checkin-all on | off            开 / 关自动签到
 //   dsh-checkin-all cron                给系统 crontab 用的静默签到
 //
-// 服务名：minimax（MiniMax Code）/ lingxi（WPS 灵犀）/ dumate（百度 DuMate）/ astudio（AStudio）/ qoder（Qoder）/ trae（Trae）/ doubao（豆包）
+// 服务名：minimax（MiniMax Code）/ lingxi（WPS 灵犀）/ dumate（百度 DuMate）/ astudio（AStudio）/ qoder（Qoder）/ trae（Trae）/ doubao（豆包）/ codearts（华为 CodeArts）/ buddy（腾讯 WorkBuddy）/ xiaohuanxiong（商汤小浣熊）/ teleagent（天翼 AI）
 //
 // 系统 crontab 里可以这样挂（不想依赖 DSH 常驻时）：
 //   0 9 * * * /path/to/dsh-checkin-all cron >> ~/.dsh/dsh-checkin-all/cron.log 2>&1
@@ -114,7 +114,13 @@ async function main() {
     const loginOpts = (target === 'buddy' && regionArg) ? { region: regionArg } : {}
     const info = await runner.loginStart(target, loginOpts)
     const browserFlow = !info.userCode
-    console.log(`在浏览器打开：${info.verificationUri}`)
+    if (info.mode === 'browser-window') {
+      // 弹窗口自登的服务：插件自己拉起了窗口，不需要用户去复制网址
+      console.log(`已弹出登录窗口：${info.verificationUri}`)
+      console.log('在窗口里用手机验证码或微信扫码登录，登完窗口会自动关掉、凭据自动保存。')
+    } else {
+      console.log(`在浏览器打开：${info.verificationUri}`)
+    }
     if (!browserFlow) console.log(`设备码：${info.userCode}`)
     if (info.verificationUriComplete && info.verificationUriComplete !== info.verificationUri) {
       console.log(`（或直接打开 ${info.verificationUriComplete}）`)
@@ -125,6 +131,8 @@ async function main() {
     const result = await runner.loginWait(target, { ...loginOpts, timeoutMs: info.expiresInSec * 1000 })
     if (target === 'codearts') console.log(`登录成功，华为云凭据已保存（${result.expiresAt} 过期）`)
     else if (target === 'buddy') console.log(`登录成功，${result.product || 'WorkBuddy'} 凭据已保存`)
+    else if (target === 'xiaohuanxiong') console.log(`登录成功，小浣熊凭据已保存（${result.account || '账号'}，当前 ${result.points ?? '?'} 积分）`)
+    else if (target === 'teleagent') console.log(`登录成功，TeleAgent 凭据已保存（${result.account || '账号'}，当前 ${result.points ?? '?'} 积分）`)
     else console.log(`登录成功，凭据已写回 MiniMax Code（${result.expiresAt} 过期）`)
     return
   }
@@ -185,6 +193,8 @@ async function main() {
       console.error('  trae     → Cloud-IDE-JWT token')
       console.error('  codearts → "access_key_id,secret_access_key[,security_token]"')
       console.error('  buddy    → access_token（可用 --region cn|intl 指定产品线）')
+      console.error('  xiaohuanxiong → xhx_token 的值，或整条 Cookie')
+      console.error('  teleagent → operationToken 的值，或整条 Cookie')
       process.exitCode = 2
       return
     }
@@ -215,8 +225,18 @@ async function main() {
       entry = { access_key_id, secret_access_key, ...(security_token ? { security_token } : {}) }
     } else if (provider === 'buddy') {
       entry = { access_token: value, region: regionArg === 'intl' ? 'intl' : 'cn' }
+    } else if (provider === 'xiaohuanxiong' || provider === 'raccoon') {
+      // 整条 Cookie 里有 = 就整条存，否则当成裸 token（两种都能用）
+      entry = value.includes('=')
+        ? { cookie: value }
+        : { cookie: `xhx_token=${value}`, token: value }
+    } else if (provider === 'teleagent') {
+      // 整条 Cookie 里有 = 就整条存，否则当成裸 operationToken
+      entry = value.includes('=')
+        ? { cookie: value }
+        : { cookie: `operationToken=${value}`, token: value }
     } else {
-      console.error(`不认识的服务：${provider}（lingxi / dumate / astudio / trae / codearts / buddy）`)
+      console.error(`不认识的服务：${provider}（lingxi / dumate / astudio / trae / codearts / buddy / xiaohuanxiong / teleagent）`)
       process.exitCode = 2
       return
     }
@@ -242,8 +262,8 @@ async function main() {
   console.log(`用法：
   dsh-checkin-all status              所有服务：登录状态 + 本周签到表
   dsh-checkin-all checkin [服务]      立刻签到（--dry 只看不领）
-  dsh-checkin-all login [服务]        登录（minimax 设备码 / codearts、buddy 浏览器授权）
-  dsh-checkin-all set <服务> <值>     手动配置凭据（lingxi/dumate/astudio/trae/codearts/buddy）
+  dsh-checkin-all login [服务]        登录（minimax 设备码 / codearts、buddy 浏览器授权 / xiaohuanxiong、teleagent 弹窗口自登）
+  dsh-checkin-all set <服务> <值>     手动配置凭据（lingxi/dumate/astudio/trae/codearts/buddy/xiaohuanxiong/teleagent）
   dsh-checkin-all unset <服务>        删除某个服务的手动凭据
   dsh-checkin-all time 08:30          改自动签到时间
   dsh-checkin-all on | off            开 / 关自动签到

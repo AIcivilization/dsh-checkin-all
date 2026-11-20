@@ -38,6 +38,16 @@ function panelText(panel, unit = '分') {
   return [`本周签到表（${summary}）：`, ...rows].join('\n')
 }
 
+/** 没登录时给一句话，说清楚这个服务该怎么登（各服务方式不一样，别一律写灵犀）。 */
+function loginHint(id) {
+  if (id === 'minimax') return '（要登录的话说「MiniMax 登录」，我会给一个设备码）'
+  if (id === 'xiaohuanxiong' || id === 'teleagent') return '（点面板上的「登录」，会弹一个浏览器窗口让你自己登；登完自动保存）'
+  if (id === 'codearts' || id === 'buddy') return '（点面板上的「登录」，在浏览器里授权一次）'
+  if (id === 'qoder') return '（点面板上的「配置令牌」，粘 Qoder 的登录态）'
+  if (id === 'doubao') return '（点面板上的「配置 Cookie」）'
+  return '（在面板上「配置凭据」，或在对应 App 里登录一次）'
+}
+
 /** 一个服务的一行状态（给模型看） */
 function providerLine(meta, account, state, cfg) {
   const bits = [
@@ -58,13 +68,14 @@ export async function buildToolDefinitions({ runner, scheduler, config, state, p
     {
       name: 'minimax_checkin',
       description:
-        '自动签到领积分：给 MiniMax Code 和/或 WPS 灵犀签到。今天还没签就签，签过了就说已经签过。' +
-        '用户说「签到」「帮我领积分」时用它；不指定服务就两个都签。',
+        '自动签到领积分：给所有已配置的服务签到（MiniMax Code、WPS 灵犀、百度 DuMate、AStudio、Qoder、' +
+        'Trae、豆包、华为 CodeArts、腾讯 WorkBuddy、商汤小浣熊、天翼 AI（TeleAgent），以及自定义服务）。' +
+        '今天还没签就签，签过了就说已经签过。用户说「签到」「帮我领积分」时用它；不指定服务就全签。',
       parameters: params({
         provider: {
           type: 'string',
           enum: providerEnum(),
-          description: '只签某一个服务：minimax（MiniMax Code）或 lingxi（WPS 灵犀）；不填就全签',
+          description: '只签某一个服务（minimax / lingxi / dumate / astudio / qoder / trae / doubao / codearts / buddy / xiaohuanxiong / teleagent）；不填就全签',
         },
         dryRun: { type: 'boolean', description: '只看签到表、不真的领（默认 false）' },
       }),
@@ -90,7 +101,8 @@ export async function buildToolDefinitions({ runner, scheduler, config, state, p
     {
       name: 'minimax_checkin_status',
       description:
-        '查签到情况：每个服务（MiniMax Code / WPS 灵犀）的登录状态、连续签到天数、累计积分、本周签到表、下次自动签到时间。',
+        '查签到情况：每个服务（MiniMax Code、WPS 灵犀、DuMate、AStudio、Qoder、Trae、豆包、CodeArts、' +
+        'WorkBuddy、商汤小浣熊、天翼 AI（TeleAgent）、自定义服务）的登录状态、连续签到天数、累计积分、本周签到表、下次自动签到时间。',
       parameters: params({
         provider: {
           type: 'string',
@@ -104,11 +116,7 @@ export async function buildToolDefinitions({ runner, scheduler, config, state, p
           const lines = []
           for (const item of value.providers) {
             lines.push(providerLine(item.meta, item.account, item.state, item.config))
-            if (!item.account.loggedIn) {
-              lines.push(item.meta.id === 'minimax'
-                ? '  （要登录的话说「MiniMax 登录」，我会给一个设备码）'
-                : '  （在 WPS 灵犀 App 里登录一次即可）')
-            }
+            if (!item.account.loggedIn) lines.push(`  ${loginHint(item.meta.id)}`)
             if (item.panel) lines.push('', panelText(item.panel, item.meta.unit))
             lines.push('')
           }
