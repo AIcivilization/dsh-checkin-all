@@ -102,32 +102,57 @@ window.__ModuleLoader__.load({
       return { status, error, reload, setStatus }
     }
 
+    /**
+     * /status 现在是按服务分发的：{ version, config, timeZone, providers: [{ id, short, config, account, state }] }。
+     * 每个字段都要兜底——这里一抛错，整个设置页就被 React 卸载成一片空白（#2）。
+     */
     function StatusRows({ status }) {
       if (!status) return h('div', { style: { fontSize: 12, color: C.faint } }, L('读取中…', 'Loading…'))
-      const { config, state, account, timeZone } = status
-      const minutes = account && account.loggedIn ? Math.round((account.expiresInSec || 0) / 60) : 0
+      const config = status.config || {}
+      const timeZone = status.timeZone || ''
+      const providers = Array.isArray(status.providers) ? status.providers : []
+      const rows = providers.map((p, i) => {
+        const account = (p && p.account) || {}
+        const st = (p && p.state) || {}
+        const own = (p && p.config) || {}
+        const last = st.lastAttempt || null
+        const bits = [account.label || (account.loggedIn ? L('已登录', 'Signed in') : L('未登录', 'Not signed in'))]
+        if (own.enabled === false) bits.push(L('自动签到已关', 'auto off'))
+        if (st.claimedToday) bits.push(L('今天已签', 'done today'))
+        if (st.streak) bits.push(L(`连续 ${st.streak} 天`, `${st.streak} days`))
+        if (last && last.ok === false && (last.message || last.outcome)) bits.push(String(last.message || last.outcome))
+        return h(Row, {
+          key: (p && p.id) || i,
+          label: (p && (p.short || p.name || p.id)) || '?',
+          value: bits.join(' · '),
+          tone: !account.loggedIn ? 'bad' : last && last.ok === false ? 'warn' : 'ok',
+        })
+      })
       return h('div', null,
         h(Row, {
-          label: L('登录状态', 'Account'),
-          value: account && account.loggedIn
-            ? (minutes > 0 ? L(`已登录 · ${minutes} 分钟后过期`, `Signed in · expires in ${minutes} min`) : L('已登录', 'Signed in'))
-            : L('未登录', 'Not signed in'),
-          tone: account && account.loggedIn ? 'ok' : 'bad',
-        }),
-        h(Row, {
           label: L('自动签到', 'Schedule'),
-          value: config.enabled ? L(`每天 ${config.time}（${timeZone}）`, `Daily ${config.time} (${timeZone})`) : L('已关闭', 'Off'),
+          value: config.enabled
+            ? L(`每天 ${config.time || '—'}${timeZone ? `（${timeZone}）` : ''}`, `Daily ${config.time || '—'}${timeZone ? ` (${timeZone})` : ''}`)
+            : L('已关闭', 'Off'),
           tone: config.enabled ? undefined : 'warn',
         }),
-        h(Row, { label: L('连续签到', 'Streak'), value: state.streak ? L(`${state.streak} 天`, `${state.streak} days`) : '—' }),
-        h(Row, { label: L('累计积分', 'Total points'), value: state.totalPoints ? `${state.totalPoints}` : '—' }),
-        state.lastAttempt
-          ? h(Row, {
-              label: L('最近一次', 'Last run'),
-              value: state.lastAttempt.message || state.lastAttempt.outcome,
-              tone: state.lastAttempt.ok ? 'ok' : 'bad',
-            })
-          : null)
+        rows.length
+          ? rows
+          : h('div', { style: { fontSize: 12, color: C.faint, paddingTop: 6 } }, L('还没有可显示的服务', 'No services yet')))
+    }
+
+    /** /checkin 的返回：指定服务时是 { result }，全签时是 { results: [] } */
+    function checkinMessage(reply) {
+      if (reply && reply.result && reply.result.message) return reply.result.message
+      if (reply && Array.isArray(reply.results) && reply.results.length) {
+        const ok = reply.results.filter(r => r && r.ok).length
+        const failed = reply.results.length - ok
+        return failed
+          ? L(`签完了：${ok} 个成功，${failed} 个没成功（详情看下面）`, `Done: ${ok} ok, ${failed} failed (see below)`)
+          : L(`签完了：${ok} 个服务都成功`, `Done: all ${ok} services ok`)
+      }
+      if (reply && reply.message) return reply.message
+      return reply && reply.ok === false ? L('失败', 'Failed') : L('完成', 'Done')
     }
 
     // —— 右侧栏的完整面板：标题行 + iframe ——
@@ -139,8 +164,7 @@ window.__ModuleLoader__.load({
       const checkin = async () => {
         setBusy(true); setMsg('')
         try {
-          const result = await api('checkin', 'POST')
-          setMsg((result.result && result.result.message) || (result.ok ? L('完成', 'Done') : L('失败', 'Failed')))
+          setMsg(checkinMessage(await api('checkin', 'POST')))
           reload()
         } catch (e) {
           setMsg(L('请求失败：', 'Request failed: ') + e.message)
@@ -181,8 +205,7 @@ window.__ModuleLoader__.load({
       const checkin = async () => {
         setBusy(true); setMsg('')
         try {
-          const result = await api('checkin', 'POST')
-          setMsg((result.result && result.result.message) || L('完成', 'Done'))
+          setMsg(checkinMessage(await api('checkin', 'POST')))
           reload()
         } catch (e) {
           setMsg(L('请求失败：', 'Request failed: ') + e.message)
@@ -214,7 +237,7 @@ window.__ModuleLoader__.load({
           h('span', { style: { fontSize: 15, fontWeight: 650 } }, L('自动签到', 'Auto check-in')),
           status && status.version ? h('span', { style: { fontSize: 12, color: C.sub } }, 'v' + status.version) : null,
           h(Btn, { onClick: checkin, disabled: busy, primary: true }, busy ? L('签到中…', 'Signing…') : L('立刻签到', 'Check in')),
-          status
+          status && status.config
             ? h(Btn, { onClick: () => toggle(!status.config.enabled) },
                 status.config.enabled ? L('关闭自动签到', 'Turn off auto check-in') : L('开启自动签到', 'Turn on auto check-in'))
             : null),
@@ -225,8 +248,8 @@ window.__ModuleLoader__.load({
 
         h(Section, { title: L('怎么打开', 'How to open') },
           h('div', null, L(
-            '签到面板在对话页的右侧栏：打开右侧栏，在引导页里点「MiniMax 签到」。',
-            'The panel lives in the conversation\'s right sidebar: open the sidebar and choose "MiniMax check-in".')),
+            '完整的签到面板在对话页的右侧栏：打开右侧栏，在引导页里点「自动签到」。',
+            'The full panel lives in the conversation\'s right sidebar: open the sidebar and choose "Auto check-in".')),
           sidebarRightApi
             ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' } },
                 h(Btn, { onClick: openSidebar }, L('在右侧栏打开', 'Open in right sidebar')),
@@ -235,10 +258,10 @@ window.__ModuleLoader__.load({
 
         h(Section, { title: L('它怎么工作', 'How it works') },
           h('div', null, L(
-            '用本机 App 已经存好的登录凭据（MiniMax Code 的 ~/.minimax/auth/、WPS 灵犀的 Cookies）调用官方签到接口，每天到点签一次。' +
-            'MiniMax 的登录过期会自动续期并写回，App 那边不受影响。不保存你的账号密码，也不上传任何东西。',
-            'It calls the official check-in endpoints with the credentials the apps already store (MiniMax Code in ~/.minimax/auth/, WPS Lingxi in its Cookies), ' +
-            'once a day at your chosen time. MiniMax tokens refresh and write back so the app keeps working. ' +
+            '优先用本机 App 已经存好的登录凭据（MiniMax Code、WPS 灵犀、Qoder 等），读不到再用面板里添加的令牌或 Cookie，' +
+            '每天到点（北京时间）调用各服务的官方签到接口签一次。不保存你的账号密码，也不上传任何东西。',
+            'It prefers the credentials the apps already store locally (MiniMax Code, WPS Lingxi, Qoder, …), falling back to tokens or cookies added in the panel, ' +
+            'and calls each service\'s official check-in endpoint once a day at your chosen time (Beijing time). ' +
             'No password is stored and nothing is uploaded.'))),
 
         h(Section, { title: L('在对话里用', 'From the chat') },

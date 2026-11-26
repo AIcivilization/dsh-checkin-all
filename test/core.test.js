@@ -789,3 +789,83 @@ test('顶部卡片布局：分组条和添加按钮占满整行', async () => {
     assert.match(rule[0], /width:\s*100%/, `.${cls} 要占满整行`)
   }
 })
+
+// ── #2 设置页空白：StatusRows 按旧版 /status 顶层 state/account 取值 ──────────────
+// 用 vm 跑真实的 plugin/client.js，配一个极简假 React（函数组件直接调用、hook 返回预置值），
+// 把 SettingsSection 渲染成字符串。组件里任何一处抛错都会让测试失败——在 DSH 里那就是整页空白。
+
+import vm from 'node:vm'
+import { buildToolDefinitions } from '../plugin/tools.js'
+
+async function loadClientSettings() {
+  const src = await readFile(new URL('../plugin/client.js', import.meta.url), 'utf8')
+  let hookValues = []
+  const React = {
+    createElement: (type, props, ...children) => ({ type, props: props || {}, children }),
+    useState: (init) => [hookValues.length ? hookValues.shift() : init, () => {}],
+    useEffect: () => {},
+    useRef: () => ({ current: null }),
+  }
+  let factory
+  const window = { __ModuleLoader__: { load: (def) => { factory = def.factory } } }
+  vm.runInNewContext(src, {
+    window, document: { documentElement: { lang: 'zh-CN' } }, navigator: { language: 'zh-CN' }, console,
+  })
+  const mod = factory((name) => { assert.equal(name, 'react'); return React })
+  let Settings
+  mod.apply({ slots: { inject: (_n, fn) => fn(), register: (_meta, C) => { Settings = C } } })
+  assert.equal(typeof Settings, 'function', '设置页组件没注册上')
+
+  const render = (node) => {
+    if (node == null || node === false || node === true) return ''
+    if (typeof node === 'string' || typeof node === 'number') return String(node)
+    if (Array.isArray(node)) return node.map(render).join('')
+    if (typeof node.type === 'function') return render(node.type({ ...node.props, children: node.children }))
+    return node.children.map(render).join('')
+  }
+  // useStatus 里第一个 useState 是 status
+  return (status) => { hookValues = [status]; return render(React.createElement(Settings)) }
+}
+
+test('#2 设置页：新版 /status（按服务分发）能正常渲染，不再空白', async () => {
+  const renderSettings = await loadClientSettings()
+  const status = await withServer(async (base) => (await fetch(`${base}/status`)).json())
+  assert.ok(Array.isArray(status.providers) && status.providers.length, '新版 /status 带 providers[]')
+  assert.equal(status.state, undefined, '新版 /status 顶层没有 state（这正是 #2 的起因）')
+
+  const text = renderSettings(status)
+  assert.match(text, /自动签到/)
+  assert.match(text, /立刻签到/)
+  assert.match(text, /MiniMax/, '每个服务一行')
+  assert.match(text, /灵犀/)
+  assert.match(text, /每天 \d\d:\d\d（Asia\/Shanghai）|已关闭/)
+})
+
+test('#2 设置页：字段缺失时兜底，不抛错', async () => {
+  const renderSettings = await loadClientSettings()
+  assert.match(renderSettings(null), /读取中/)
+  assert.match(renderSettings({}), /还没有可显示的服务/)
+  assert.match(renderSettings({ config: { enabled: true, time: '09:00' }, providers: [{}, null, { id: 'x' }] }), /每天 09:00/)
+  // 旧版结构也不能让它崩
+  assert.doesNotThrow(() => renderSettings({ config: { enabled: false }, state: {}, account: { loggedIn: true } }))
+})
+
+test('#2 签到工具：结果不带签到表的服务（豆包等）不再多一行「签到表读不出来」', async () => {
+  const metas = [
+    { id: 'doubao', name: '豆包', short: '豆包', unit: '额度' },
+    { id: 'lingxi', name: 'WPS 灵犀', short: '灵犀', unit: '智点' },
+  ]
+  const tools = await buildToolDefinitions({
+    runner: { meta: () => metas }, scheduler: null, config: async () => ({}), state: async () => ({}), providerConfig: () => ({}),
+  })
+  const checkin = tools.find(t => t.name === 'minimax_checkin')
+  const [{ text }] = checkin.output.render({}, {
+    results: [
+      { ok: true, provider: 'doubao', message: '豆包：#1：今天已签' },
+      { ok: true, provider: 'lingxi', message: '已签', panel: { days: [{ dayNo: 1, points: 5, status: 3, isToday: true }], claimedDays: 1, totalPoints: 5 } },
+    ],
+  })
+  assert.doesNotMatch(text, /签到表读不出来/)
+  assert.match(text, /豆包：豆包：#1：今天已签/)
+  assert.match(text, /本周签到表/, '带签到表的服务照常显示')
+})

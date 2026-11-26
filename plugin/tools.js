@@ -23,8 +23,10 @@ const plain = value => JSON.parse(JSON.stringify(value == null ? null : value))
 
 const DAY_STATUS_TEXT = { 1: '未到', 2: '可领', 3: '已领', 4: '未开放' }
 
+const hasPanelDays = panel => Boolean(panel && Array.isArray(panel.days) && panel.days.length)
+
 function panelText(panel, unit = '分') {
-  if (!panel || !panel.days || !panel.days.length) return '签到表读不出来'
+  if (!hasPanelDays(panel)) return '签到表读不出来'
   const rows = panel.days.map(day => {
     const mark = day.isToday ? ' ←今天' : ''
     const bonus = day.bonusPoints ? `+${day.bonusPoints}奖励` : ''
@@ -85,9 +87,11 @@ export async function buildToolDefinitions({ runner, scheduler, config, state, p
           type: 'text',
           text: (value.results || []).map(r => {
             const meta = metas().find(m => m.id === r.provider) || { short: r.provider, unit: '分' }
-            return r.ok
+            if (!r.ok) return `${meta.short} 签到没成功：${r.message}`
+            // 豆包 / Qoder / Trae 等服务签到结果里本来就不带签到表，别补一句「签到表读不出来」误导人（#2）
+            return hasPanelDays(r.panel)
               ? `${meta.short}：${r.message}\n${panelText(r.panel, meta.unit)}`
-              : `${meta.short} 签到没成功：${r.message}`
+              : `${meta.short}：${r.message}`
           }).join('\n\n'),
         }],
       },
