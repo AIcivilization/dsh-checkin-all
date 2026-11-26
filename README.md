@@ -787,6 +787,7 @@ node --test "test/*.test.js"
 感谢以下朋友的贡献：
 
 - [@holyhigh-dodo10901](https://github.com/holyhigh-dodo10901)：支持 Qoder 国内版（CN）客户端的登录态识别（[#1](https://github.com/AIcivilization/dsh-checkin-all/pull/1)）
+- [@lingkai0123](https://github.com/lingkai0123)：定位「设置 → 自动签到」页面空白的根因，并给出修复方案（[#2](https://github.com/AIcivilization/dsh-checkin-all/issues/2)）
 
 欢迎提 Issue 和 PR。
 
