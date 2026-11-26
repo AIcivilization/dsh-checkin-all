@@ -740,7 +740,7 @@ test('索引卡片：未登录', () => {
 
 test('详情折叠：除第一张概览卡外都可折叠，且默认折叠', async () => {
   // 直接从源码里核对 makeCollapsible 的规则，避免以后被改坏
-  const src = await readFile('/Users/wf/dsh/dsh-checkin-all/web/panel.js', 'utf8')
+  const src = await readFile(new URL('../web/panel.js', import.meta.url), 'utf8')
 
   // 1) 第一张卡跳过
   assert.match(src, /if \(idx === 0\) return/, '概览卡不该被折叠')
@@ -755,19 +755,19 @@ test('详情折叠：除第一张概览卡外都可折叠，且默认折叠', as
 })
 
 test('详情折叠：CSS 里三角是橙色、折叠时隐藏内容', async () => {
-  const css = await readFile('/Users/wf/dsh/dsh-checkin-all/web/panel.css', 'utf8')
+  const css = await readFile(new URL('../web/panel.css', import.meta.url), 'utf8')
   assert.match(css, /\.card-head\.collapsible-head \.chev[\s\S]{0,200}color:\s*var\(--warn\)/, '三角要用橙色（--warn）')
   assert.match(css, /\.card\.collapsed \.card-body\s*\{\s*display:\s*none/, '折叠时内容要隐藏')
   assert.match(css, /justify-content:\s*flex-start/, '三角插到前面后要改左对齐')
 })
 
 test('详情折叠：head 里的按钮不会误触发折叠', async () => {
-  const src = await readFile('/Users/wf/dsh/dsh-checkin-all/web/panel.js', 'utf8')
+  const src = await readFile(new URL('../web/panel.js', import.meta.url), 'utf8')
   assert.match(src, /e\.target\.closest\('button'\)/, '点刷新等按钮时不该折叠卡片')
 })
 
 test('顶部卡片布局：.index 是纵向流，卡片网格交给 .igroup', async () => {
-  const css = await readFile('/Users/wf/dsh/dsh-checkin-all/web/panel.css', 'utf8')
+  const css = await readFile(new URL('../web/panel.css', import.meta.url), 'utf8')
   const idx = css.match(/\.index \{[^}]+\}/)
   assert.ok(idx, '找不到 .index 规则')
   // 踩过的坑：.index 用 grid 时，里面的 igroup / 折叠条 / 添加按钮
@@ -782,7 +782,7 @@ test('顶部卡片布局：.index 是纵向流，卡片网格交给 .igroup', as
 })
 
 test('顶部卡片布局：分组条和添加按钮占满整行', async () => {
-  const css = await readFile('/Users/wf/dsh/dsh-checkin-all/web/panel.css', 'utf8')
+  const css = await readFile(new URL('../web/panel.css', import.meta.url), 'utf8')
   for (const cls of ['igroup-toggle', 'igroup-add']) {
     const rule = css.match(new RegExp(`\\.${cls} \\{[^}]+\\}`))
     assert.ok(rule, `找不到 .${cls}`)
