@@ -450,9 +450,11 @@ POST {openApi}/sash/api/v1/me/campaigns/{id}/claim   幂等领取（重复返回
 
 - 国内版 `https://openapi.qoder.com.cn`，国际版 `https://openapi.qoder.sh`
 - 凭据有两条路，**优先用本机 Qoder App 的登录**（零配置）：
-  1. 本机 Qoder 桌面 App 登录态：`<App Support>/com.qoder.app.stable/auth.v1.dat`
-     （Electron safeStorage，密钥在钥匙串「Qoder App Safe Storage」），
-     解出来直接当 token 用；`authenticationContext` 里是 `openapi.qoder.sh` 就走国际版
+  1. 本机 Qoder 桌面 App 登录态（国内版优先，国际版兜底）：
+     - 国内版：`<App Support>/com.qodercn.app.stable/auth.v1.dat`，密钥在钥匙串「Qoder CN App Safe Storage」
+     - 国际版：`<App Support>/com.qoder.app.stable/auth.v1.dat`，密钥在钥匙串「Qoder App Safe Storage」
+
+     （Electron safeStorage）解出来直接当 token 用；`authenticationContext` 里是 `openapi.qoder.sh` 就走国际版
   2. 个人访问令牌（PAT）：面板里填，存 `~/.dsh/dsh-checkin-all/secrets.json`（0600），
      会先打 `exchange` 接口验真再落盘
 - 「今天」按**北京时间**算
@@ -779,6 +781,14 @@ node --test "test/*.test.js"
 **技术**
 `DeepSeek Harness` `dsh` `dsh-plugin` `cordis` `插件` `面板` `dashboard`
 `北京时区` `beijing-time` `零配置` `本机凭据` `OAuth`
+
+## 贡献者
+
+感谢以下朋友的贡献：
+
+- [@holyhigh-dodo10901](https://github.com/holyhigh-dodo10901)：支持 Qoder 国内版（CN）客户端的登录态识别（[#1](https://github.com/AIcivilization/dsh-checkin-all/pull/1)）
+
+欢迎提 Issue 和 PR。
 
 ## License
 
