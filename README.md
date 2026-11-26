@@ -14,7 +14,7 @@
 
 **没在列表里的服务，可以自己 DIY 签到**——面板点「＋ 添加签到服务」，让 DSH 的 AI 帮你查接口，或直接贴一份 JSON，导入就变成新卡片。
 
-**每个服务都支持多账号**：同一个服务配多个号，逐个签、分别记账，一个失败不影响其他。
+**每个服务都支持多账号**：同一个服务配多个号（本机 App 登着的那个 + 你添加的），逐个签、**逐个记账**，一个失败不影响其他，也只重试失败的那个。多个入口同时签（定时器、面板、AI、终端命令）也不会互相覆盖。
 
 装进 [DeepSeek Harness](https://github.com/deepseek-ai/dsh)（dsh）之后，它会用本机 App 已经存好的登录凭据，每天到点调一次官方签到接口，签完记账，面板挂在对话页右侧栏。
 
@@ -24,7 +24,7 @@
 
 ## 三个重点能力
 
-### 1. 内置 11 个服务，开箱即用
+### 1. 内置 12 个服务，开箱即用
 
 装上就能签，凭据自动从本机 App 里读，不用手动配。详见下方「支持的服务」。
 
@@ -82,8 +82,12 @@ node bin/dsh-checkin-all.js set lingxi "<sid>" --name 小号
 ```
 
 汇总规则：任一账号签上就算成功，积分累加，连续天数取最大值；单个账号失败不影响其他账号，消息里会点名是哪个失败。
+**每个账号的结果单独记**：有账号没签上，定时器会在退避后再签一次（只要还有账号没签上就不算「今天签完了」）。
 
-支持多账号的：灵犀、DuMate、AStudio、Qoder、Trae、豆包、CodeArts、WorkBuddy，以及**所有 DIY 的自定义服务**。
+**本机 App 登着的账号 + 你添加的账号一起签**：比如本机 Qoder App 登的是你，面板里又加了同事的令牌，两个都签，
+不会因为加了一个就把本机那个顶掉（同一个账号会自动去重）。
+
+支持多账号的：灵犀、DuMate、AStudio、Qoder、Trae、豆包、CodeArts、WorkBuddy、小浣熊、TeleAgent、OfficeAce，以及**所有 DIY 的自定义服务**。
 （MiniMax 例外：凭据是 App 的 OAuth 文件且 refresh token 一次性，不适合多账号。）
 
 ## 支持的服务
@@ -95,12 +99,13 @@ node bin/dsh-checkin-all.js set lingxi "<sid>" --name 小号
 | 百度 DuMate | `qianfan-desktop-app/auth.json`（加密 cookie） | 积分 | ✅ | **北京时间** |
 | AStudio | `~/.acode/acode/userdata/astron-session.json` | 积分 | ✅ | **北京时间** |
 | Qoder | 本机 Qoder App 登录（自动读），或面板填 PAT | 积分 | ✅ | **北京时间** |
-| Trae | 本机 Trae App/CLI 登录（自动读） | 积分 | ✅ | **北京时间** |
+| Trae | 本机 Trae App / Trae CLI 登录（自动读），也可面板加令牌 | 积分 | ✅ | **北京时间** |
 | 豆包 | 登录 Cookie（面板「配置 Cookie」，或从本机豆包/浏览器读） | 额度 | ✅ | **北京时间** |
 | 华为 CodeArts | 浏览器登录（点一下授权，自动拿 AK/SK；也可手填） | 积分 | ✅ | **北京时间** |
 | 腾讯 WorkBuddy | 浏览器登录（点一下授权；也可手贴 token） | 积分 | ✅ | **北京时间** |
 | 商汤小浣熊 | 点「登录」弹一个独立浏览器窗口，自己登录即自动取 token（也可手贴 Cookie） | 积分 | ✅ | **北京时间** |
 | 天翼 AI（TeleAgent） | 点「登录」弹一个独立浏览器窗口，自己登录即自动取 token（也可手贴 operationToken） | 积分 | ✅ | **北京时间** |
+| OfficeAce（华为云，实验） | 点「登录」用华为云账号在浏览器里登录（每登一次加一个账号） | 积分 | ✅ | **北京时间** |
 | **自定义服务** | 面板「添加签到服务」，AI 生成或自己贴 JSON | 自定义 | ✅ | **北京时间** |
 
 **全部服务一律按北京时间算「今天」和签到窗口，不跟随本机时区。**
@@ -197,7 +202,7 @@ node bin/dsh-checkin-all.js unset lingxi   # 删除某个服务的手动凭据�
 
 ## 加新的签到服务（不写代码）
 
-内置 11 个服务，但外面还有一堆能签到的站点。面板底部有个 **「＋ 添加签到服务」**，
+内置 12 个服务，但外面还有一堆能签到的站点。面板底部有个 **「＋ 添加签到服务」**，
 点开有两条路：
 
 ### 方式一：让 DSH 的 AI 帮你做（推荐）
@@ -290,7 +295,22 @@ node bin/dsh-checkin-all.js set lingxi "<另一个 wps_sid>" --name 小号
 汇总规则：任一账号签上就算 `claimed`，积分累加，连续天数取最大的那个；
 部分账号失败不影响其他账号，消息里会点名是哪个失败了。
 
-支持多账号的：灵犀、DuMate、AStudio、Qoder、Trae、豆包、CodeArts、WorkBuddy、小浣熊、TeleAgent。
+### 多账号、多入口同时签：互不冲突
+
+- **逐账号记账**：`state.json` 里每个服务多一份 `accounts`（每个账号最近一次的结果，key 稳定、改备注名不变）。
+  面板详情里两个以上账号时每个账号一行。有账号没签上（不是「没这玩法 / 要重新登录」），
+  定时器按失败退避后再签，直到都签上或当天放弃；已经签上的账号再签只会得到「今天已签」，不会重复领。
+- **本机 App 的登录 + 添加的账号一起签**：灵犀、DuMate、AStudio、Qoder、Trae 都会把本机 App 登着的账号也签上，
+  同一个账号（同一个 sid / accountId / 用户 id）自动去重。
+- **同一个服务同一时刻只跑一次**：定时器、面板按钮、AI 工具同时要签，后来的直接等前一次的结果；
+  终端里的 `dsh-checkin-all` 命令也在签，就等它签完（锁文件 `~/.dsh/dsh-checkin-all/locks/`）。
+  一次性的续期令牌（MiniMax、OfficeAce）不会被并发用两次。
+- **不同服务并行**：默认最多同时签 4 个服务（`DSH_CHECKIN_ALL_CONCURRENCY` 可调）；
+  同一个服务的多个账号逐个签，避免同一个 IP 短时间并发打同一家接口触发风控。
+- **凭据 / 记账 / 设置文件读改写整段加锁**（进程内排队 + 跨进程锁文件）：续期写回、面板加账号、
+  几个服务同时记账都不会互相覆盖。`secrets.json` 万一被改坏，会拒绝写入而不是当成空的把账号全清掉。
+
+支持多账号的：灵犀、DuMate、AStudio、Qoder、Trae、豆包、CodeArts、WorkBuddy、小浣熊、TeleAgent、OfficeAce。
 **MiniMax 例外**——它的凭据是 App 里的 OAuth 文件（`~/.minimax/auth/`），
 天然只有一份，且 refresh token 一次性，不适合手动塞多份 token。
 
@@ -493,7 +513,14 @@ POST https://api.trae.cn/trae/api/v2/ug/checkin_credits/status   今天签没签
 POST https://api.trae.cn/trae/api/v2/ug/checkin_credits/claim    签到
 ```
 
-- 凭据：本机 Trae 的登录（桌面 App 的 `storage.json` 加密信封，或 `~/.trae-cn/trae-jwt-token` / `~/.trae/trae-jwt-token`），只读不落盘
+- 凭据（全部读出来按账号去重，每个账号签一次）：
+  1. 桌面 App 的 `storage.json` 加密信封
+  2. 旧版 CLI 的 `~/.trae-cn/trae-jwt-token` / `~/.trae/trae-jwt-token`
+  3. **Trae CLI**（`trae-cli` / `traecli`）的 `~/.trae/cli/auth.json`、`~/.trae-cn/cli/auth.json`：
+     只读 `access_token`，不碰 refresh token、不续期，不和 CLI 抢令牌；海外区账号跳过（签到接口是国内版的）
+  4. 面板「账号」卡片里添加的令牌（可以好几个，VPS 上也能签）
+
+  本机的只读不落盘
 - 桌面 App 位置：`{TRAE SOLO CN | Trae CN | Trae | TRAE SOLO}/User/globalStorage/storage.json`
 - 「今天」按**北京时间**算
 
@@ -714,6 +741,23 @@ dsh-checkin-all set teleagent "整条 Cookie 串" --name 主号
 > token 失效（HTTP 401 / `code:"4001"`）时返回 `needs_login`，面板提示重新登一次，
 > 不会当故障反复重试。要换另一个号，先删掉 `~/.dsh/dsh-checkin-all/browser/teleagent` 再点「登录」。
 
+### OfficeAce（华为云，实验）
+
+华为云 AgentArts 的办公助手每天可以领一次奖励积分（`lib/providers/officeace.js`，移植自 dsh-model 的签到）：
+
+```
+登录：华为云 OAuth（授权码 + PKCE + DPoP），回调在华为云 AgentArts，按 state 轮询取回授权码
+      → STS 换临时 AK/SK + security token（约一天）和一次性 refresh token
+领取：POST https://officeace.cn-southwest-2.huaweicloud-agentarts.com/v1/subscription/bonus/claim
+      （华为云 APIG 签名 V11-HMAC-SHA256）
+```
+
+- 面板点「登录」→ 浏览器里用华为云账号登录 → 回到面板就好了；**每登录一次加一个账号**，同一个华为云项目再登录是更新那个账号
+- 临时密钥快到期会自动续期，新的 refresh token **只能用一次**，换完立刻写回那一个账号（不碰别的账号）
+- 所以这份登录**不能复制到别的机器**（两边会互相顶掉），每台机器各自登录
+- 登录失效时那个账号显示「需要重新登录」，不影响其他账号，也不会反复重试
+- 「今天」按**北京时间**算
+
 ## 隐私
 
 - 不保存账号密码，只用 App 已经存好的 OAuth 凭据
@@ -775,7 +819,7 @@ node --test "test/*.test.js"
 
 **服务**
 `MiniMax Code` `WPS 灵犀` `百度 DuMate` `搭子` `AStudio` `星火` `Qoder` `Trae` `豆包`
-`华为 CodeArts` `华为云` `腾讯 WorkBuddy` `CodeBuddy` `商汤小浣熊` `小浣熊` `xiaohuanxiong`
+`华为 CodeArts` `华为云` `OfficeAce` `腾讯 WorkBuddy` `CodeBuddy` `商汤小浣熊` `小浣熊` `xiaohuanxiong`
 `天翼 AI` `TeleAgent` `teleagent` `agent.teleai.com.cn`
 
 **技术**

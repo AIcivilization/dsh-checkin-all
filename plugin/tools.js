@@ -71,13 +71,14 @@ export async function buildToolDefinitions({ runner, scheduler, config, state, p
       name: 'minimax_checkin',
       description:
         '自动签到领积分：给所有已配置的服务签到（MiniMax Code、WPS 灵犀、百度 DuMate、AStudio、Qoder、' +
-        'Trae、豆包、华为 CodeArts、腾讯 WorkBuddy、商汤小浣熊、天翼 AI（TeleAgent），以及自定义服务）。' +
+        'Trae、豆包、华为 CodeArts、腾讯 WorkBuddy、商汤小浣熊、天翼 AI（TeleAgent）、OfficeAce（华为云），以及自定义服务）。' +
+        '每个服务可以有多个账号，会逐个签、互不影响。' +
         '今天还没签就签，签过了就说已经签过。用户说「签到」「帮我领积分」时用它；不指定服务就全签。',
       parameters: params({
         provider: {
           type: 'string',
           enum: providerEnum(),
-          description: '只签某一个服务（minimax / lingxi / dumate / astudio / qoder / trae / doubao / codearts / buddy / xiaohuanxiong / teleagent）；不填就全签',
+          description: '只签某一个服务（minimax / lingxi / dumate / astudio / qoder / trae / doubao / codearts / buddy / xiaohuanxiong / teleagent / officeace）；不填就全签',
         },
         dryRun: { type: 'boolean', description: '只看签到表、不真的领（默认 false）' },
       }),
@@ -106,7 +107,7 @@ export async function buildToolDefinitions({ runner, scheduler, config, state, p
       name: 'minimax_checkin_status',
       description:
         '查签到情况：每个服务（MiniMax Code、WPS 灵犀、DuMate、AStudio、Qoder、Trae、豆包、CodeArts、' +
-        'WorkBuddy、商汤小浣熊、天翼 AI（TeleAgent）、自定义服务）的登录状态、连续签到天数、累计积分、本周签到表、下次自动签到时间。',
+        'WorkBuddy、商汤小浣熊、天翼 AI（TeleAgent）、OfficeAce、自定义服务）的登录状态、连续签到天数、累计积分、本周签到表、下次自动签到时间。',
       parameters: params({
         provider: {
           type: 'string',

@@ -353,11 +353,13 @@ function renderDetail() {
     ? `${new Date(last.at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} · ${last.message || last.outcome}`
     : ''
 
-  const canLogin = ['minimax', 'codearts', 'buddy', 'xiaohuanxiong', 'teleagent'].includes(p.id)
+  const canLogin = ['minimax', 'codearts', 'buddy', 'xiaohuanxiong', 'teleagent', 'officeace'].includes(p.id)
   // 浏览器授权式登录（没有设备码，弹窗里只显示「等待浏览器授权」）
-  const browserLogin = p.id === 'codearts' || p.id === 'buddy' || WINDOW_LOGIN_IDS.includes(p.id)
+  const browserLogin = p.id === 'codearts' || p.id === 'buddy' || p.id === 'officeace' || WINDOW_LOGIN_IDS.includes(p.id)
   // 支持手动配置凭据的服务
   const canManual = ['lingxi', 'dumate', 'astudio', 'trae', 'codearts', 'xiaohuanxiong', 'teleagent'].includes(p.id)
+  // 只能登录、不能手填凭据，但也有多个账号要列出来（可删）
+  const listOnly = p.id === 'officeace'
   const isDoubao = p.id === 'doubao'
   const isBuddy = p.id === 'buddy'
   const isQoder = p.id === 'qoder'
@@ -403,6 +405,7 @@ function renderDetail() {
         })()}</span></div>
       ${lastText ? `<div class="row"><span class="label">最近一次</span>
         <span class="value ${last.ok ? 'ok' : 'bad'}">${esc(lastText)}</span></div>` : ''}
+      ${accountRows(st.accounts)}
     </section>
 
     ${isQoder ? `
@@ -494,13 +497,15 @@ function renderDetail() {
     </section>
     ` : ''}
 
-    ${canManual ? `
+    ${canManual || listOnly ? `
     <section class="card" id="cred-card">
       <div class="card-head">
         <h2>账号</h2>
         <span class="hint" id="cred-status"></span>
       </div>
       <div id="cred-list" class="field"></div>
+      ${listOnly ? `<p class="hint">每点一次上面的「登录」就加一个账号（同一个华为云项目再登录是更新那个账号）。每个账号各签各的，互不影响。</p>
+      <div class="actions"><button class="btn" id="btn-cred-clear">清空全部</button><span id="cred-msg" class="hint"></span></div>` : `
       <div class="field">
         <label for="cred-value">${esc(manualHint)}</label>
         <textarea id="cred-value" rows="3" placeholder="${esc(manualHint)}"></textarea>
@@ -513,7 +518,7 @@ function renderDetail() {
         <button class="btn primary" id="btn-cred-save">添加账号</button>
         <button class="btn" id="btn-cred-clear">清空全部</button>
         <span id="cred-msg" class="hint"></span>
-      </div>
+      </div>`}
     </section>
     ` : ''}
 
@@ -597,9 +602,10 @@ function renderDetail() {
   // 手动凭据配置
   const credBtn = $('#btn-cred')
   const credCard = $('#cred-card')
-  if (credCard && credBtn) {
-    credBtn.onclick = () => { credCard.scrollIntoView({ behavior: 'smooth', block: 'center' }) }
-    $('#btn-cred-save').onclick = () => saveCredential(p.id)
+  if (credCard) {
+    if (credBtn) credBtn.onclick = () => { credCard.scrollIntoView({ behavior: 'smooth', block: 'center' }) }
+    const saveBtn = $('#btn-cred-save')
+    if (saveBtn) saveBtn.onclick = () => saveCredential(p.id)
     $('#btn-cred-clear').onclick = () => clearCredential(p.id)
     loadCredentialStatus(p.id)
   }
@@ -821,6 +827,18 @@ async function removeQoderPat(id) {
   } catch (e) {
     if (msg) msg.textContent = `删除失败：${e.message}`
   }
+}
+
+/**
+ * 多账号：每个账号最近一次的结果各占一行（只有两个以上账号才显示）。
+ * 一个账号失败不会被别的账号的成功盖住，定时器也只会因为它没签上而稍后重试。
+ */
+function accountRows(accounts) {
+  const list = accounts && typeof accounts === 'object' ? Object.values(accounts) : []
+  if (list.length < 2) return ''
+  const tone = (a) => (a.ok ? 'ok' : ['no_task', 'not_yet'].includes(a.outcome) ? 'warn' : 'bad')
+  return list.map((a) => `<div class="row"><span class="label">· ${esc(a.label || '账号')}</span>
+        <span class="value ${tone(a)}">${esc(a.message || a.outcome || '')}</span></div>`).join('')
 }
 
 /** 读某个服务的手动凭据状态（脱敏，只显示「已配置」） */
@@ -1282,7 +1300,7 @@ async function startLogin(id, opts = {}) {
         const r = await api(`/login/wait?id=${encodeURIComponent(id)}${qs}`, { method: 'POST' })
         if (r.ok) {
           $('#login').classList.add('hidden')
-          const who = id === 'buddy' ? 'WorkBuddy' : (id === 'codearts' ? 'CodeArts' : (WINDOW_LOGIN_LABEL[id] || '服务'))
+          const who = id === 'buddy' ? 'WorkBuddy' : id === 'codearts' ? 'CodeArts' : id === 'officeace' ? 'OfficeAce' : (WINDOW_LOGIN_LABEL[id] || '服务')
           banner(`${who} 登录成功，凭据已保存`, 'ok')
           await refresh()
         } else {
