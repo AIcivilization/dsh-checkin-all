@@ -348,10 +348,30 @@ MiniMax Code 桌面端自己用的就是这两个接口，插件原样调用（`
 GET  https://agent.minimax.io/minimax-cloud/api/v1/signin/status?timezone_id=<IANA>
 POST https://agent.minimax.io/minimax-cloud/api/v1/signin/claim?timezone_id=<IANA>
 Authorization: Bearer <access token>
+x-timestamp: <unix 秒>
+x-signature: md5("<unix 秒>" + <盐> + "<请求体原文>")     # GET 的请求体是空串
 ```
 
 `agent.minimax.io` / `agent.minimax.cn` 按 region 分（`en` / `cn`）。**必须带 `timezone_id`**，
 不带会报 `invalid timezone_id`——这是「按谁的一天算」的关键。
+
+两条 2026-11-26 实测到的坑（都已在 `lib/signin.js` 里处理）：
+
+1. **签名头是硬的**。不带 `x-timestamp` / `x-signature`，网关先查签名再查登录，任何请求直接
+   `HTTP 400 {"error":"invalid signature"}`——这时 token 根本没被看一眼。盐是客户端明文里的常量
+   （网页 bundle `mavis-chat` 的 axios 拦截器），换服端改版可能要跟着换。
+2. **`agent.minimax.io` 是个区域路由器**。它对所有 `minimax-cloud` 请求回 `307` 跳到
+   `agent.minimaxi.com`，而按 fetch 规范，跨源重定向会把 `Authorization` 丢掉——用 `fetch` 默认跟随时，
+   真正落到服务上的是「没带 token 的请求」，只回一个空体 401，看着像 token 错，其实是 token 半路没了。
+   所以这里自己用 `redirect: 'manual'` 跟跳转、每一跳都带着 token 重发，才能看到服务真正的原因。
+
+未验证：盐与签名算法来自客户端 bundle 明文，服务端改版就要跟着换（`test/signin-sign.test.js` 会先红）。
+
+**401 已经定论（2026-11-26 真签成功）**：签到服务只认**国内站**（`account.minimax.cn` 设备码登录，
+`prod/cn` 命名空间）签出来的 token；海外 `prod/en` 那份在 `agent.minimax.io` / `agent.minimax.cn` /
+`agent.minimaxi.com` 上都是 `invalid access token`，token 本身没坏（能正常刷新）。
+要留意 `activeNamespace()` 是按「凭据 mtime 最新」挑的：桌面端刷新 en 之后，插件会切回 en 并重新 401，
+所以 MiniMax 签到依赖 cn 那份凭据保持最新。详见 `docs/minimax-signin-400-2026-11-26.md`。
 
 凭据（`lib/credentials.js`）：
 
