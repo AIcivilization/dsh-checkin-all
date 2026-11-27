@@ -852,6 +852,7 @@ node --test "test/*.test.js"
 
 - [@holyhigh-dodo10901](https://github.com/holyhigh-dodo10901)：支持 Qoder 国内版（CN）客户端的登录态识别（[#1](https://github.com/AIcivilization/dsh-checkin-all/pull/1)）
 - [@lingkai0123](https://github.com/lingkai0123)：定位「设置 → 自动签到」页面空白的根因，并给出修复方案（[#2](https://github.com/AIcivilization/dsh-checkin-all/issues/2)）
+- [@ink1453](https://github.com/ink1453)：修复 MiniMax Code 签到 HTTP 400/401——补上网关签名头、处理 307 丢 token、厘清区域账号结论（[#3](https://github.com/AIcivilization/dsh-checkin-all/pull/3)）
 
 欢迎提 Issue 和 PR。
 
